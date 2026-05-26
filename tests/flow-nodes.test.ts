@@ -5,6 +5,7 @@ import {
   graphNodesToFlowNodes,
   moveContainedNodesWithDraggedFrames,
   mergeFlowNodePositions,
+  preventResponseFrameOverlapDuringDrag,
   syncResponseFrameBounds,
 } from '../src/lib/flow-nodes.js';
 import type { GraphNode } from '../src/lib/types.js';
@@ -264,6 +265,50 @@ test('response frame bounds keep the default frame size after live sync', () => 
   assert.equal(syncedFrame.height, 1120);
 });
 
+test('response frame bounds avoid overlap after live drag sync', () => {
+  const firstFrame: GraphNode = {
+    ...threadNode,
+    id: 'response:alpha:1',
+    type: 'responseFrame',
+    category: 'responseFrame',
+    position: { x: 0, y: 0 },
+    width: 1180,
+    height: 1120,
+  } as GraphNode;
+  const firstRuntime: GraphNode = {
+    ...threadNode,
+    id: 'orchestrator:alpha:1',
+    type: 'orchestrator',
+    category: 'agentExecution',
+    containerId: firstFrame.id,
+    position: { x: 200, y: 200 },
+    width: 200,
+    height: 120,
+  } as GraphNode;
+  const secondFrame: GraphNode = {
+    ...firstFrame,
+    id: 'response:alpha:2',
+    position: { x: 0, y: 760 },
+  } as GraphNode;
+  const secondRuntime: GraphNode = {
+    ...firstRuntime,
+    id: 'orchestrator:alpha:2',
+    containerId: secondFrame.id,
+    position: { x: 200, y: 950 },
+  } as GraphNode;
+  const graphNodes = [firstFrame, firstRuntime, secondFrame, secondRuntime];
+  const synced = syncResponseFrameBounds(graphNodesToFlowNodes(graphNodes, null, new Set()), graphNodes);
+  const syncedFirstFrame = synced.find((node) => node.id === firstFrame.id)!;
+  const syncedSecondFrame = synced.find((node) => node.id === secondFrame.id)!;
+  const syncedSecondRuntime = synced.find((node) => node.id === secondRuntime.id)!;
+
+  assert.ok(
+    syncedSecondFrame.position.y >=
+      syncedFirstFrame.position.y + Number(syncedFirstFrame.height) + 180
+  );
+  assert.equal(syncedSecondRuntime.position.y, secondRuntime.position.y + (syncedSecondFrame.position.y - 760));
+});
+
 test('dragging a response frame moves all contained nodes by the same delta', () => {
   const responseFrame: GraphNode = {
     ...threadNode,
@@ -306,6 +351,50 @@ test('dragging a response frame moves all contained nodes by the same delta', ()
 
   assert.deepEqual(movedNodes.find((node) => node.id === firstRuntime.id)?.position, { x: 380, y: 280 });
   assert.deepEqual(movedNodes.find((node) => node.id === secondRuntime.id)?.position, { x: 960, y: 720 });
+});
+
+test('dragging a node toward another response frame stops before pushing the other frame away', () => {
+  const firstFrame: GraphNode = {
+    ...threadNode,
+    id: 'response:alpha:1',
+    type: 'responseFrame',
+    category: 'responseFrame',
+    position: { x: 0, y: 0 },
+    width: 1180,
+    height: 1120,
+  } as GraphNode;
+  const firstRuntime: GraphNode = {
+    ...threadNode,
+    id: 'orchestrator:alpha:1',
+    type: 'orchestrator',
+    category: 'agentExecution',
+    containerId: firstFrame.id,
+    position: { x: 200, y: 200 },
+    width: 200,
+    height: 120,
+  } as GraphNode;
+  const secondFrame: GraphNode = {
+    ...firstFrame,
+    id: 'response:alpha:2',
+    position: { x: 0, y: 1300 },
+  } as GraphNode;
+  const secondRuntime: GraphNode = {
+    ...firstRuntime,
+    id: 'orchestrator:alpha:2',
+    containerId: secondFrame.id,
+    position: { x: 200, y: 1500 },
+  } as GraphNode;
+  const graphNodes = [firstFrame, firstRuntime, secondFrame, secondRuntime];
+  const currentFlowNodes = graphNodesToFlowNodes(graphNodes, null, new Set());
+  const changedFlowNodes = currentFlowNodes.map((node) =>
+    node.id === firstRuntime.id ? { ...node, position: { x: 200, y: 1200 } } : node
+  );
+
+  const clampedNodes = preventResponseFrameOverlapDuringDrag(changedFlowNodes, currentFlowNodes, graphNodes);
+
+  assert.deepEqual(clampedNodes.find((node) => node.id === firstRuntime.id)?.position, { x: 200, y: 200 });
+  assert.deepEqual(clampedNodes.find((node) => node.id === secondRuntime.id)?.position, { x: 200, y: 1500 });
+  assert.deepEqual(clampedNodes.find((node) => node.id === secondFrame.id)?.position, { x: 0, y: 1300 });
 });
 
 test('user moved node positions are preserved when graph nodes refresh', () => {

@@ -7,6 +7,7 @@ const RESPONSE_FRAME_PAD_TOP = 190;
 const RESPONSE_FRAME_PAD_BOTTOM = 150;
 const RESPONSE_FRAME_MIN_W = 1180;
 const RESPONSE_FRAME_MIN_H = 1120;
+const RESPONSE_FRAME_STACK_GAP_Y = 180;
 
 export function graphNodesToFlowNodes(
   graphNodes: GraphNode[],
@@ -125,6 +126,55 @@ export function moveContainedNodesWithDraggedFrames(
   });
 }
 
+export function preventResponseFrameOverlapDuringDrag(
+  changedNodes: Node[],
+  previousNodes: Node[],
+  graphNodes: GraphNode[]
+): Node[] {
+  const graphNodeById = new Map(graphNodes.map((node) => [node.id, node]));
+  const previousNodeById = new Map(previousNodes.map((node) => [node.id, node]));
+  const movedFrameIds = new Set<string>();
+
+  for (const node of changedNodes) {
+    const previousNode = previousNodeById.get(node.id);
+    if (!previousNode || samePosition(node.position, previousNode.position)) continue;
+
+    const graphNode = graphNodeById.get(node.id);
+    if (graphNode?.category === 'responseFrame') {
+      movedFrameIds.add(graphNode.id);
+    } else if (graphNode?.containerId) {
+      movedFrameIds.add(graphNode.containerId);
+    }
+  }
+
+  if (movedFrameIds.size === 0) return changedNodes;
+
+  const previousRects = responseFrameRects(previousNodes, graphNodes);
+  const changedRects = responseFrameRects(changedNodes, graphNodes);
+  const blockedFrameIds = new Set<string>();
+
+  for (const frameId of movedFrameIds) {
+    const movedRect = changedRects.get(frameId);
+    if (!movedRect) continue;
+
+    for (const [otherFrameId, otherRect] of previousRects) {
+      if (otherFrameId === frameId) continue;
+      if (!rectsOverlapWithGap(movedRect, otherRect, RESPONSE_FRAME_STACK_GAP_Y)) continue;
+      blockedFrameIds.add(frameId);
+      break;
+    }
+  }
+
+  if (blockedFrameIds.size === 0) return changedNodes;
+
+  return changedNodes.map((node) => {
+    const graphNode = graphNodeById.get(node.id);
+    const frameId = graphNode?.category === 'responseFrame' ? graphNode.id : graphNode?.containerId;
+    if (!frameId || !blockedFrameIds.has(frameId)) return node;
+    return previousNodeById.get(node.id) ?? node;
+  });
+}
+
 export function syncResponseFrameBounds(flowNodes: Node[], graphNodes: GraphNode[]): Node[] {
   const flowNodeById = new Map(flowNodes.map((node) => [node.id, node]));
   const graphNodeById = new Map(graphNodes.map((node) => [node.id, node]));
@@ -137,7 +187,7 @@ export function syncResponseFrameBounds(flowNodes: Node[], graphNodes: GraphNode
     containedIdsByFrameId.set(graphNode.containerId, ids);
   }
 
-  return flowNodes.map((node) => {
+  const syncedNodes = flowNodes.map((node) => {
     const graphNode = graphNodeById.get(node.id);
     if (graphNode?.category !== 'responseFrame') return node;
 
@@ -178,6 +228,122 @@ export function syncResponseFrameBounds(flowNodes: Node[], graphNodes: GraphNode
       },
     };
   });
+
+  return stackSyncedResponseFrames(syncedNodes, graphNodes);
+}
+
+function stackSyncedResponseFrames(flowNodes: Node[], graphNodes: GraphNode[]): Node[] {
+  const graphNodeById = new Map(graphNodes.map((node) => [node.id, node]));
+  const flowNodeById = new Map(flowNodes.map((node) => [node.id, node]));
+  const frames = graphNodes
+    .filter((node) => node.category === 'responseFrame')
+    .map((node) => flowNodeById.get(node.id))
+    .filter((node): node is Node => node !== undefined)
+    .sort((a, b) => a.position.y - b.position.y || a.position.x - b.position.x || a.id.localeCompare(b.id));
+  if (frames.length < 2) return flowNodes;
+
+  const shiftsByFrameId = new Map<string, number>();
+  let previousBottom = Number.NEGATIVE_INFINITY;
+
+  for (const frame of frames) {
+    const frameHeight = numericDimension(frame.height, graphNodeById.get(frame.id)?.height);
+    const minY = previousBottom + RESPONSE_FRAME_STACK_GAP_Y;
+    const shiftY = frame.position.y < minY ? minY - frame.position.y : 0;
+    const shiftedY = frame.position.y + shiftY;
+    if (shiftY > 0) shiftsByFrameId.set(frame.id, shiftY);
+    previousBottom = shiftedY + frameHeight;
+  }
+
+  if (shiftsByFrameId.size === 0) return flowNodes;
+
+  return flowNodes.map((node) => {
+    const graphNode = graphNodeById.get(node.id);
+    const shiftY = shiftsByFrameId.get(node.id) ?? (graphNode?.containerId ? shiftsByFrameId.get(graphNode.containerId) : 0);
+    if (!shiftY) return node;
+
+    return {
+      ...node,
+      position: {
+        x: node.position.x,
+        y: node.position.y + shiftY,
+      },
+    };
+  });
+}
+
+interface Rect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+function responseFrameRects(flowNodes: Node[], graphNodes: GraphNode[]): Map<string, Rect> {
+  const graphNodeById = new Map(graphNodes.map((node) => [node.id, node]));
+  const flowNodeById = new Map(flowNodes.map((node) => [node.id, node]));
+  const containedIdsByFrameId = new Map<string, string[]>();
+
+  for (const graphNode of graphNodes) {
+    if (!graphNode.containerId) continue;
+    const ids = containedIdsByFrameId.get(graphNode.containerId) ?? [];
+    ids.push(graphNode.id);
+    containedIdsByFrameId.set(graphNode.containerId, ids);
+  }
+
+  const rects = new Map<string, Rect>();
+  for (const graphNode of graphNodes) {
+    if (graphNode.category !== 'responseFrame') continue;
+    const frameNode = flowNodeById.get(graphNode.id);
+    if (!frameNode) continue;
+
+    const containedNodes = (containedIdsByFrameId.get(graphNode.id) ?? [])
+      .map((id) => flowNodeById.get(id))
+      .filter((candidate): candidate is Node => candidate !== undefined);
+
+    if (containedNodes.length === 0) {
+      rects.set(graphNode.id, {
+        x: frameNode.position.x,
+        y: frameNode.position.y,
+        width: numericDimension(frameNode.width, graphNode.width),
+        height: numericDimension(frameNode.height, graphNode.height),
+      });
+      continue;
+    }
+
+    const minX = Math.min(...containedNodes.map((candidate) => candidate.position.x));
+    const minY = Math.min(...containedNodes.map((candidate) => candidate.position.y));
+    const maxX = Math.max(
+      ...containedNodes.map((candidate) => {
+        const candidateGraphNode = graphNodeById.get(candidate.id);
+        return candidate.position.x + numericDimension(candidate.width, candidateGraphNode?.width);
+      })
+    );
+    const maxY = Math.max(
+      ...containedNodes.map((candidate) => {
+        const candidateGraphNode = graphNodeById.get(candidate.id);
+        return candidate.position.y + numericDimension(candidate.height, candidateGraphNode?.height);
+      })
+    );
+
+    rects.set(graphNode.id, {
+      x: minX - RESPONSE_FRAME_PAD_X,
+      y: minY - RESPONSE_FRAME_PAD_TOP,
+      width: Math.max(RESPONSE_FRAME_MIN_W, maxX - minX + RESPONSE_FRAME_PAD_X * 2),
+      height: Math.max(RESPONSE_FRAME_MIN_H, maxY - minY + RESPONSE_FRAME_PAD_TOP + RESPONSE_FRAME_PAD_BOTTOM),
+    });
+  }
+
+  return rects;
+}
+
+function rectsOverlapWithGap(a: Rect, b: Rect, gapY: number): boolean {
+  const xOverlaps = a.x < b.x + b.width && b.x < a.x + a.width;
+  const yOverlaps = a.y < b.y + b.height + gapY && b.y < a.y + a.height + gapY;
+  return xOverlaps && yOverlaps;
+}
+
+function samePosition(a: { x: number; y: number }, b: { x: number; y: number }): boolean {
+  return a.x === b.x && a.y === b.y;
 }
 
 function numericDimension(value: unknown, fallback?: number): number {

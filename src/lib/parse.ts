@@ -3,16 +3,16 @@ import { threadKey } from './types';
 import { traceFeedEntries } from './trace-feed';
 
 const AGENT_ACCENTS = [
-  '#2dd4bf',
-  '#60a5fa',
-  '#f59e0b',
-  '#f472b6',
-  '#a78bfa',
-  '#34d399',
-  '#fb7185',
-  '#38bdf8',
-  '#c084fc',
-  '#facc15',
+  '#fbf8cc',
+  '#fde4cf',
+  '#ffcfd2',
+  '#f1c0e8',
+  '#cfbaf0',
+  '#a3c4f3',
+  '#90dbf4',
+  '#8eecf5',
+  '#98f5e1',
+  '#b9fbc0',
 ];
 
 function parentSubagentWouldCycle(
@@ -204,7 +204,7 @@ export function buildGraph(
           source: orchestratorId,
           target: threadFeedId,
           kind: 'trace',
-          accentColor: orchestratorAccent,
+          accentColor: richOutlineColor(orchestratorAccent),
         });
       });
 
@@ -245,7 +245,7 @@ export function buildGraph(
           target: sid,
           kind: 'spawn',
           weight: sub.tokens?.totalTokens ?? 0,
-          accentColor: subagentAccent,
+          accentColor: richOutlineColor(subagentAccent),
         });
 
         const subFeedId = `feed:${sid}`;
@@ -275,7 +275,7 @@ export function buildGraph(
           source: sid,
           target: subFeedId,
           kind: 'trace',
-          accentColor: subagentAccent,
+          accentColor: richOutlineColor(subagentAccent),
         });
       });
     }
@@ -491,7 +491,19 @@ function responseFrameIndexForTimestamp(frames: ResponseFrame[], timestamp: stri
 }
 
 function agentAccentStyle(color: string): Record<string, string> {
-  return { '--agent-accent': color };
+  const surfaceRgb = hexToRgb(color);
+  const outlineRgb = richOutlineRgb(surfaceRgb);
+  return {
+    '--agent-accent': richOutlineColor(color),
+    '--agent-accent-strong': `rgba(${outlineRgb.r}, ${outlineRgb.g}, ${outlineRgb.b}, 0.38)`,
+    '--agent-accent-faint': `rgba(${surfaceRgb.r}, ${surfaceRgb.g}, ${surfaceRgb.b}, 1)`,
+    '--agent-accent-surface': `rgba(${surfaceRgb.r}, ${surfaceRgb.g}, ${surfaceRgb.b}, 0.18)`,
+  };
+}
+
+function richOutlineColor(color: string): string {
+  const outlineRgb = richOutlineRgb(hexToRgb(color));
+  return rgbToHex(outlineRgb);
 }
 
 function agentAccentColor(key: string): string {
@@ -500,6 +512,30 @@ function agentAccentColor(key: string): string {
     hash = (hash * 31 + key.charCodeAt(index)) >>> 0;
   }
   return AGENT_ACCENTS[hash % AGENT_ACCENTS.length];
+}
+
+function hexToRgb(color: string): { r: number; g: number; b: number } {
+  return {
+    r: Number.parseInt(color.slice(1, 3), 16),
+    g: Number.parseInt(color.slice(3, 5), 16),
+    b: Number.parseInt(color.slice(5, 7), 16),
+  };
+}
+
+function rgbToHex(rgb: { r: number; g: number; b: number }): string {
+  return `#${hexChannel(rgb.r)}${hexChannel(rgb.g)}${hexChannel(rgb.b)}`;
+}
+
+function hexChannel(value: number): string {
+  return value.toString(16).padStart(2, '0');
+}
+
+function richOutlineRgb(rgb: { r: number; g: number; b: number }): { r: number; g: number; b: number } {
+  return {
+    r: Math.max(0, Math.round(rgb.r * 0.62 - 28)),
+    g: Math.max(0, Math.round(rgb.g * 0.62 - 28)),
+    b: Math.max(0, Math.round(rgb.b * 0.62 - 28)),
+  };
 }
 
 function numberValue(value: unknown): number | undefined {

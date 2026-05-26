@@ -15,16 +15,27 @@ function ruleFor(selector: string): string {
   return matches.at(-1)![1];
 }
 
-test('response frame prompt preview is 250 percent font size', () => {
-  assert.match(ruleFor('.response-frame-header .response-frame-preview strong'), /font-size:\s*250%;/);
+test('response frame prompt preview scales with the prompt label', () => {
+  assert.match(ruleFor('.response-frame-header .response-frame-preview strong'), /font-size:\s*44px;/);
+  assert.match(ruleFor('.response-frame-header .response-frame-preview strong'), /font-weight:\s*700;/);
 });
 
 test('response frame output preview is 175 percent font size', () => {
   assert.match(ruleFor('.response-frame-footer .response-frame-preview strong'), /font-size:\s*175%;/);
 });
 
-test('response frame labels are prominent at 180 percent', () => {
-  assert.match(ruleFor('.response-frame-header span,\n.response-frame-footer span'), /font-size:\s*180%;/);
+test('response frame prompt label is styled as a compact pill', () => {
+  assert.match(responseFrameSource, /className="response-frame-label"/);
+  assert.match(ruleFor('.response-frame-label'), /border-radius:\s*5px;/);
+  assert.match(ruleFor('.response-frame-label'), /letter-spacing:\s*0;/);
+  assert.match(ruleFor('.response-frame-label'), /text-transform:\s*uppercase;/);
+  assert.match(ruleFor('.response-frame-header .response-frame-label'), /font-size:\s*30px;/);
+});
+
+test('response frame header has a refined surface', () => {
+  assert.match(ruleFor('.response-frame-header'), /padding:\s*10px 12px;/);
+  assert.match(ruleFor('.response-frame-header'), /border-radius:\s*7px;/);
+  assert.match(ruleFor('.response-frame-header'), /box-shadow:/);
 });
 
 test('response frame previews expose click-to-expand controls', () => {

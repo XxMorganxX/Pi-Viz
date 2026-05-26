@@ -25,6 +25,7 @@ import {
   graphNodesToFlowNodes,
   mergeFlowNodePositions,
   moveContainedNodesWithDraggedFrames,
+  preventResponseFrameOverlapDuringDrag,
   syncResponseFrameBounds,
 } from '../lib/flow-nodes';
 import { graphEdgesToFlowEdges } from '../lib/flow-edges';
@@ -81,7 +82,8 @@ function GraphCanvasInner({
       setNodes((current) => {
         const changed = applyNodeChanges(changes, current);
         const moved = moveContainedNodesWithDraggedFrames(changed, current, graphNodesRef.current);
-        return syncResponseFrameBounds(moved, graphNodesRef.current);
+        const clamped = preventResponseFrameOverlapDuringDrag(moved, current, graphNodesRef.current);
+        return syncResponseFrameBounds(clamped, graphNodesRef.current);
       });
     },
     [setNodes]

@@ -252,3 +252,72 @@ test('layoutGraph formats response-frame contents into agent levels with separat
   assert.ok(byId.get('response:1')!.width! >= 1900);
   assert.ok(byId.get('response:1')!.height! >= 1120);
 });
+
+test('layoutGraph prevents expanded response-frame boxes from overlapping', () => {
+  const frame = (id: string, index: number): GraphNode => ({
+    id,
+    type: 'responseFrame',
+    category: 'responseFrame',
+    position: { x: 0, y: 0 },
+    data: {
+      kind: 'responseFrame',
+      thread: (node('orchestrator:template', 'orchestrator').data as any).thread,
+      turn: {
+        index,
+        startedAt: '2026-05-25T00:00:00.000Z',
+        endedAt: '2026-05-25T00:00:01.000Z',
+        durationMs: 1000,
+        assistantMessages: 1,
+        toolCalls: 0,
+        subagentCalls: 1,
+        toolCallsByName: {},
+        tokens: { totalTokens: 0, cost: { total: 0 } },
+      },
+    },
+    parentId: 'mission:1',
+  });
+  const agent = (id: string, parentId: string, frameId: string): GraphNode => ({
+    ...node(id, id.startsWith('orchestrator') ? 'orchestrator' : 'subagent', parentId),
+    containerId: frameId,
+  });
+  const feed = (id: string, parentId: string, frameId: string): GraphNode => ({
+    ...node(id, 'traceFeed', parentId),
+    containerId: frameId,
+  });
+
+  const response1 = frame('response:1', 1);
+  const response2 = frame('response:2', 2);
+  const orchestrator1 = agent('orchestrator:1', response1.id, response1.id);
+  const subagent1 = agent('sub:1', orchestrator1.id, response1.id);
+  const nestedSubagent = agent('sub:1:nested', subagent1.id, response1.id);
+  const orchestrator2 = agent('orchestrator:2', response2.id, response2.id);
+
+  const model: GraphModel = {
+    nodes: [
+      node('mission:1', 'mission'),
+      response1,
+      orchestrator1,
+      subagent1,
+      nestedSubagent,
+      feed('feed:orchestrator:1', orchestrator1.id, response1.id),
+      response2,
+      orchestrator2,
+      feed('feed:orchestrator:2', orchestrator2.id, response2.id),
+    ],
+    edges: [
+      { id: 'e:mission:1->response:1', source: 'mission:1', target: response1.id, kind: 'containment' },
+      { id: 'e:response:1->response:2', source: response1.id, target: response2.id, kind: 'sequence' },
+      { id: 'e:orchestrator:1->sub:1', source: orchestrator1.id, target: subagent1.id, kind: 'spawn' },
+      { id: 'e:orchestrator:1->feed:orchestrator:1', source: orchestrator1.id, target: 'feed:orchestrator:1', kind: 'trace' },
+      { id: 'e:orchestrator:2->feed:orchestrator:2', source: orchestrator2.id, target: 'feed:orchestrator:2', kind: 'trace' },
+    ],
+  };
+
+  const byId = new Map(layoutGraph(model).nodes.map((n) => [n.id, n]));
+  const firstFrame = byId.get(response1.id)!;
+  const secondFrame = byId.get(response2.id)!;
+
+  assert.ok(secondFrame.position.y >= firstFrame.position.y + firstFrame.height! + 180);
+  assert.ok(byId.get(orchestrator2.id)!.position.y > secondFrame.position.y);
+  assert.ok(byId.get('feed:orchestrator:2')!.position.y > secondFrame.position.y);
+});

@@ -26,7 +26,7 @@ function ResponseFrameNodeImpl(props: NodeProps) {
       <Handle type="target" position={Position.Top} />
       <SourceHandles count={sourceHandleCount(props.data)} />
       <div className="response-frame-header">
-        <span>Prompt {turn.index}</span>
+        <span className="response-frame-label">Prompt {turn.index}</span>
         <button
           type="button"
           className={`response-frame-preview nodrag ${expandedPrompt ? 'expanded' : ''}`}
@@ -42,7 +42,7 @@ function ResponseFrameNodeImpl(props: NodeProps) {
       </div>
       <div className="response-frame-body" />
       <div className={`response-frame-footer ${expandedAssistant ? 'assistant-expanded' : ''}`}>
-        <span>Assistant response</span>
+        <span className="response-frame-label">Assistant response</span>
         <button
           type="button"
           className={`response-frame-preview nodrag ${expandedAssistant ? 'expanded' : ''}`}

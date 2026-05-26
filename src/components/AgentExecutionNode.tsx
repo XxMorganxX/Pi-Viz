@@ -11,11 +11,12 @@ function AgentExecutionNodeImpl(props: NodeProps) {
   const data = props.data as unknown as OrchestratorNodeData | SubagentNodeData;
   const view = agentExecutionView(data);
   const provider = view.model ? providerOf(view.model) : 'other';
+  const providerClass = view.role === 'orchestrator' ? `provider-${provider}` : '';
   const failed = view.exitCode !== undefined && view.exitCode !== 0;
 
   return (
     <div
-      className={`node node-agent-execution role-${view.role} provider-${provider} ${failed ? 'exit-nonzero' : ''} ${
+      className={`node node-agent-execution role-${view.role} ${providerClass} ${failed ? 'exit-nonzero' : ''} ${
         props.selected ? 'selected' : ''
       }`}
     >

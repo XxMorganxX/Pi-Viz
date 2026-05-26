@@ -14,6 +14,7 @@ const TRACE_FEED_H = 760;
 const RESPONSE_FRAME_PAD_X = 70;
 const RESPONSE_FRAME_PAD_TOP = 190;
 const RESPONSE_FRAME_PAD_BOTTOM = 150;
+const RESPONSE_FRAME_STACK_GAP_Y = 180;
 const AGENT_LEVEL_GAP_Y = 170;
 const AGENT_SIBLING_GAP_X = 150;
 const TRACE_FEED_ROW_GAP_Y = 120;
@@ -69,8 +70,9 @@ export function layoutGraph(model: GraphModel): GraphModel {
 
   const formatted = formatResponseFrameContents(positioned);
   const framed = expandResponseFrames(formatted);
+  const stacked = stackResponseFrames(framed);
   const edges: GraphEdge[] = model.edges.map((e) => ({ ...e }));
-  return { nodes: framed, edges };
+  return { nodes: stacked, edges };
 }
 
 function sizeForNode(node: GraphNode): { width: number; height: number } {
@@ -229,6 +231,39 @@ function expandResponseFrames(nodes: GraphNode[]): GraphNode[] {
       width: bounds.width,
       height: bounds.height,
       style: { width: bounds.width, height: bounds.height },
+    };
+  });
+}
+
+function stackResponseFrames(nodes: GraphNode[]): GraphNode[] {
+  const frames = nodes
+    .filter((node) => node.category === 'responseFrame')
+    .sort((a, b) => a.position.y - b.position.y || a.position.x - b.position.x || a.id.localeCompare(b.id));
+  if (frames.length < 2) return nodes;
+
+  const shiftsByFrameId = new Map<string, number>();
+  let previousBottom = Number.NEGATIVE_INFINITY;
+
+  for (const frame of frames) {
+    const minY = previousBottom + RESPONSE_FRAME_STACK_GAP_Y;
+    const shiftY = frame.position.y < minY ? minY - frame.position.y : 0;
+    const shiftedY = frame.position.y + shiftY;
+    if (shiftY > 0) shiftsByFrameId.set(frame.id, shiftY);
+    previousBottom = shiftedY + (frame.height ?? RESPONSE_FRAME_H);
+  }
+
+  if (shiftsByFrameId.size === 0) return nodes;
+
+  return nodes.map((node) => {
+    const shiftY = shiftsByFrameId.get(node.id) ?? (node.containerId ? shiftsByFrameId.get(node.containerId) : 0);
+    if (!shiftY) return node;
+
+    return {
+      ...node,
+      position: {
+        x: node.position.x,
+        y: node.position.y + shiftY,
+      },
     };
   });
 }
