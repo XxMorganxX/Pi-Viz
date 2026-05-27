@@ -12,6 +12,7 @@ const agentExecutionNodeSource = readFileSync(
 );
 const parseSource = readFileSync(new URL('../src/lib/parse.ts', import.meta.url), 'utf8');
 const appSource = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+const toolbarSource = readFileSync(new URL('../src/components/Toolbar.tsx', import.meta.url), 'utf8');
 const stylesSource = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
 
 test('graph canvas does not render the React Flow minimap', () => {
@@ -117,6 +118,32 @@ test('camera focus requests are separate from persistent response frame selectio
   assert.doesNotMatch(appSource, /focusedNodeId=\{focusedResponseFrameId\}/);
   assert.match(appSource, /setCameraFocusNodeId\(nextId\)/);
   assert.match(graphCanvasSource, /onFocusedNodeSettled/);
+});
+
+test('reload preserves current node positions instead of auto-formatting', () => {
+  assert.match(appSource, /autoFormatVersion/);
+  assert.match(appSource, /const handleReload = useCallback\(\(\) => \{\s*void ds\.reload\(\);\s*\}/s);
+  assert.doesNotMatch(appSource, /const handleReload = useCallback\(\(\) => \{[^}]*setAutoFormatVersion/s);
+});
+
+test('top toolbar exposes an explicit format action for auto-formatting', () => {
+  assert.match(appSource, /const handleFormat = useCallback\(\(\) => \{/);
+  assert.match(appSource, /setAutoFormatVersion\(\(version\) => version \+ 1\)/);
+  assert.match(appSource, /onFormat=\{handleFormat\}/);
+  assert.match(graphCanvasSource, /refreshFlowNodePositions/);
+  assert.match(appSource, /autoFormatVersion=\{autoFormatVersion\}/);
+  assert.match(graphCanvasSource, /preservePositions = autoFormatVersionRef\.current === autoFormatVersion/);
+  assert.match(graphCanvasSource, /autoFormatOnNewNodes: true/);
+  assert.match(toolbarSource, /onFormat: \(\) => void/);
+  assert.match(toolbarSource, /<button onClick=\{onFormat\} disabled=\{!snapshot\}>Format<\/button>/);
+});
+
+test('graph canvas persists node positions between browser refreshes', () => {
+  assert.match(graphCanvasSource, /layoutStorageKey/);
+  assert.match(graphCanvasSource, /readSavedNodeLayout/);
+  assert.match(graphCanvasSource, /applySavedNodeLayout/);
+  assert.match(graphCanvasSource, /writeSavedNodeLayout/);
+  assert.match(graphCanvasSource, /captureNodeLayout/);
 });
 
 test('graph canvas keeps response frame bounds synced after node changes', () => {

@@ -193,6 +193,100 @@ test('layoutGraph appends response frames after existing frames', () => {
   assert.ok(byId.get('response:3')!.position.y > byId.get('response:2')!.position.y);
 });
 
+test('layoutGraph centers minimum response-frame bounds around the prompt flow', () => {
+  const frame: GraphNode = {
+    id: 'response:1',
+    type: 'responseFrame',
+    category: 'responseFrame',
+    position: { x: 0, y: 0 },
+    data: {
+      kind: 'responseFrame',
+      thread: (node('orchestrator:template', 'orchestrator').data as any).thread,
+      turn: {
+        index: 1,
+        startedAt: '2026-05-25T00:00:00.000Z',
+        endedAt: '2026-05-25T00:00:01.000Z',
+        durationMs: 1000,
+        assistantMessages: 1,
+        toolCalls: 0,
+        subagentCalls: 0,
+        toolCallsByName: {},
+        tokens: { totalTokens: 0, cost: { total: 0 } },
+      },
+    },
+    parentId: 'mission:1',
+  };
+  const orchestrator: GraphNode = {
+    ...node('orchestrator:1', 'orchestrator', frame.id),
+    containerId: frame.id,
+  };
+
+  const byId = new Map(
+    layoutGraph({
+      nodes: [node('mission:1', 'mission'), frame, orchestrator],
+      edges: [
+        { id: 'e:mission:1->response:1', source: 'mission:1', target: frame.id, kind: 'containment' },
+      ],
+    }).nodes.map((n) => [n.id, n])
+  );
+  const laidOutFrame = byId.get(frame.id)!;
+  const laidOutOrchestrator = byId.get(orchestrator.id)!;
+
+  assert.equal(laidOutFrame.width, 1180);
+  assert.equal(
+    laidOutFrame.position.x + laidOutFrame.width! / 2,
+    laidOutOrchestrator.position.x + laidOutOrchestrator.width! / 2
+  );
+});
+
+test('layoutGraph stacks response frame centers on one vertical centerline', () => {
+  const frame = (id: string, index: number): GraphNode => ({
+    id,
+    type: 'responseFrame',
+    category: 'responseFrame',
+    position: { x: 0, y: 0 },
+    data: {
+      kind: 'responseFrame',
+      thread: (node('orchestrator:template', 'orchestrator').data as any).thread,
+      turn: {
+        index,
+        startedAt: '2026-05-25T00:00:00.000Z',
+        endedAt: '2026-05-25T00:00:01.000Z',
+        durationMs: 1000,
+        assistantMessages: 1,
+        toolCalls: 0,
+        subagentCalls: 0,
+        toolCallsByName: {},
+        tokens: { totalTokens: 0, cost: { total: 0 } },
+      },
+    },
+    parentId: 'mission:1',
+  });
+  const firstFrame = frame('response:1', 1);
+  const secondFrame = frame('response:2', 2);
+  const firstOrchestrator = { ...node('orchestrator:1', 'orchestrator', firstFrame.id), containerId: firstFrame.id };
+  const firstFeed = { ...node('feed:1', 'traceFeed', firstOrchestrator.id), containerId: firstFrame.id };
+  const secondOrchestrator = { ...node('orchestrator:2', 'orchestrator', secondFrame.id), containerId: secondFrame.id };
+
+  const byId = new Map(
+    layoutGraph({
+      nodes: [node('mission:1', 'mission'), firstFrame, firstOrchestrator, firstFeed, secondFrame, secondOrchestrator],
+      edges: [
+        { id: 'e:mission:1->response:1', source: 'mission:1', target: firstFrame.id, kind: 'containment' },
+        { id: 'e:response:1->response:2', source: firstFrame.id, target: secondFrame.id, kind: 'sequence' },
+        { id: 'e:orchestrator:1->feed:1', source: firstOrchestrator.id, target: firstFeed.id, kind: 'trace' },
+      ],
+    }).nodes.map((n) => [n.id, n])
+  );
+  const laidOutFirstFrame = byId.get(firstFrame.id)!;
+  const laidOutSecondFrame = byId.get(secondFrame.id)!;
+  const laidOutSecondOrchestrator = byId.get(secondOrchestrator.id)!;
+  const firstCenterX = laidOutFirstFrame.position.x + laidOutFirstFrame.width! / 2;
+
+  assert.equal(laidOutSecondFrame.position.x + laidOutSecondFrame.width! / 2, firstCenterX);
+  assert.equal(laidOutSecondOrchestrator.position.x + laidOutSecondOrchestrator.width! / 2, firstCenterX);
+});
+
 test('layoutGraph formats response-frame contents into agent levels with separated trace feeds', () => {
   const frame: GraphNode = {
     id: 'response:1',
@@ -248,6 +342,11 @@ test('layoutGraph formats response-frame contents into agent levels with separat
   assert.ok(byId.get('orchestrator:1')!.position.y < byId.get('sub:1')!.position.y);
   assert.ok(byId.get('feed:orchestrator:1')!.position.y > byId.get('orchestrator:1')!.position.y);
   assert.ok(byId.get('feed:sub:1')!.position.y > byId.get('sub:1')!.position.y);
+  assert.equal(
+    byId.get('feed:sub:1')!.position.x + byId.get('feed:sub:1')!.width! / 2,
+    byId.get('sub:1')!.position.x + byId.get('sub:1')!.width! / 2
+  );
+  assert.ok(byId.get('feed:orchestrator:1')!.position.x > byId.get('sub:1')!.position.x + byId.get('sub:1')!.width!);
   assert.ok(Math.abs(byId.get('feed:orchestrator:1')!.position.x - byId.get('feed:sub:1')!.position.x) >= 980);
   assert.ok(byId.get('response:1')!.width! >= 1900);
   assert.ok(byId.get('response:1')!.height! >= 1120);
@@ -320,4 +419,93 @@ test('layoutGraph prevents expanded response-frame boxes from overlapping', () =
   assert.ok(secondFrame.position.y >= firstFrame.position.y + firstFrame.height! + 180);
   assert.ok(byId.get(orchestrator2.id)!.position.y > secondFrame.position.y);
   assert.ok(byId.get('feed:orchestrator:2')!.position.y > secondFrame.position.y);
+});
+
+test('layoutGraph spaces each parent child row evenly without overlapping nodes', () => {
+  const frame: GraphNode = {
+    id: 'response:1',
+    type: 'responseFrame',
+    category: 'responseFrame',
+    position: { x: 0, y: 0 },
+    data: {
+      kind: 'responseFrame',
+      thread: (node('orchestrator:template', 'orchestrator').data as any).thread,
+      turn: {
+        index: 1,
+        startedAt: '2026-05-25T00:00:00.000Z',
+        endedAt: '2026-05-25T00:00:01.000Z',
+        durationMs: 1000,
+        assistantMessages: 1,
+        toolCalls: 0,
+        subagentCalls: 6,
+        toolCallsByName: {},
+        tokens: { totalTokens: 0, cost: { total: 0 } },
+      },
+    },
+    parentId: 'mission:1',
+  };
+  const orchestrator: GraphNode = {
+    ...node('orchestrator:1', 'orchestrator', frame.id),
+    containerId: frame.id,
+  };
+  const children = ['sub:1', 'sub:2'].map((id) => ({
+    ...node(id, 'subagent', orchestrator.id),
+    containerId: frame.id,
+  }));
+  const grandchildren = children.flatMap((parent, parentIndex) =>
+    [1, 2].map((childIndex) => ({
+      ...node(`sub:${parentIndex + 1}:${childIndex}`, 'subagent', parent.id),
+      containerId: frame.id,
+    }))
+  );
+
+  const model: GraphModel = {
+    nodes: [node('mission:1', 'mission'), frame, orchestrator, ...children, ...grandchildren],
+    edges: [
+      { id: 'e:mission:1->response:1', source: 'mission:1', target: frame.id, kind: 'containment' },
+      ...[...children, ...grandchildren].map((child) => ({
+        id: `e:orchestrator:1->${child.id}`,
+        source: child.parentId!,
+        target: child.id,
+        kind: 'spawn' as const,
+      })),
+    ],
+  };
+
+  const byId = new Map(layoutGraph(model).nodes.map((n) => [n.id, n]));
+  const laidOutChildren = children.map((child) => byId.get(child.id)!);
+  const centers = laidOutChildren.map((child) => child.position.x + child.width! / 2);
+  const firstGap = centers[1] - centers[0];
+  const childrenWidthSum = laidOutChildren.reduce((sum, child) => sum + child.width!, 0);
+  const childrenRowWidth =
+    Math.max(...laidOutChildren.map((child) => child.position.x + child.width!)) -
+    Math.min(...laidOutChildren.map((child) => child.position.x));
+
+  assert.equal(laidOutChildren[0].position.y, laidOutChildren[1].position.y);
+  assert.equal(childrenRowWidth, childrenWidthSum * 1.6);
+  assert.equal(firstGap, laidOutChildren[0].width! + childrenWidthSum * 0.6);
+  assert.equal(
+    centers.reduce((sum, center) => sum + center, 0) / centers.length,
+    byId.get(orchestrator.id)!.position.x + byId.get(orchestrator.id)!.width! / 2
+  );
+
+  for (const parent of children) {
+    const laidOutParent = byId.get(parent.id)!;
+    const parentCenter = laidOutParent.position.x + laidOutParent.width! / 2;
+    const laidOutGrandchildren = grandchildren
+      .filter((child) => child.parentId === parent.id)
+      .map((child) => byId.get(child.id)!);
+    const grandchildCenters = laidOutGrandchildren.map((child) => child.position.x + child.width! / 2);
+    const childRowCenter = grandchildCenters.reduce((sum, center) => sum + center, 0) / grandchildCenters.length;
+    const grandchildGap = grandchildCenters[1] - grandchildCenters[0];
+    const grandchildWidthSum = laidOutGrandchildren.reduce((sum, child) => sum + child.width!, 0);
+    const grandchildRowWidth =
+      Math.max(...laidOutGrandchildren.map((child) => child.position.x + child.width!)) -
+      Math.min(...laidOutGrandchildren.map((child) => child.position.x));
+
+    assert.equal(laidOutGrandchildren[0].position.y, laidOutGrandchildren[1].position.y);
+    assert.equal(childRowCenter, parentCenter);
+    assert.equal(grandchildRowWidth, grandchildWidthSum * 1.6);
+    assert.equal(grandchildGap, laidOutGrandchildren[0].width! + grandchildWidthSum * 0.6);
+  }
 });

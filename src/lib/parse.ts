@@ -146,17 +146,19 @@ export function buildGraph(
         const scopedToFrame = responseFrames.length > 1 && frame;
         const frameStart = frame?.turn.startedAt;
         const frameEnd = frame?.turn.endedAt;
+        const includeFrameStart =
+          idx === 0 || frame?.turn.startedAt !== responseFrames[idx - 1]?.turn.endedAt;
         const runtimeEvents = scopedToFrame
           ? thread.runtimeEvents?.filter(
               (event) =>
-                !event.parentAgentId && timestampInFrame(event.timestamp, frameStart, frameEnd, idx === 0)
+                !event.parentAgentId && timestampInFrame(event.timestamp, frameStart, frameEnd, includeFrameStart)
             )
           : thread.runtimeEvents?.filter((event) => !event.parentAgentId);
         const toolEvents = scopedToFrame
-          ? thread.toolEvents?.filter((event) => timestampInFrame(event.timestamp, frameStart, frameEnd, idx === 0))
+          ? thread.toolEvents?.filter((event) => timestampInFrame(event.timestamp, frameStart, frameEnd, includeFrameStart))
           : thread.toolEvents;
         const skillEvents = scopedToFrame
-          ? thread.skillEvents?.filter((event) => timestampInFrame(event.timestamp, frameStart, frameEnd, idx === 0))
+          ? thread.skillEvents?.filter((event) => timestampInFrame(event.timestamp, frameStart, frameEnd, includeFrameStart))
           : thread.skillEvents;
         nodes.push({
           id: orchestratorId,
@@ -311,19 +313,21 @@ function responseFramesForThread(thread: Thread): ResponseFrame[] {
   const frameTurnEvents = turnEndedEvents.filter(hasResponseFramePreview);
 
   if (frameTurnEvents.length > 0) {
-    let previousStart = thread.firstTs;
+    let previousBoundary = thread.firstTs;
     return frameTurnEvents.map((event, idx) => {
       const index = idx + 1;
       const endedAt = event.timestamp;
+      const promptStartEvent = promptStartEventForFrame(runtimeEvents, previousBoundary, endedAt, idx === 0);
+      const startedAt = promptStartEvent?.timestamp ?? previousBoundary;
       const promptPreview =
         (index === 1 ? thread.requestPreview : undefined) ??
         previewFromEvent(event, 'user_message') ??
-        promptPreviewFromSessionStart(runtimeEvents, previousStart, endedAt, idx === 0);
+        (promptStartEvent ? promptPreviewFromEvent(promptStartEvent) : undefined);
       const turn: Turn = {
         index,
-        startedAt: previousStart,
+        startedAt,
         endedAt,
-        durationMs: Math.max(0, timestampMs(endedAt) - timestampMs(previousStart)),
+        durationMs: Math.max(0, timestampMs(endedAt) - timestampMs(startedAt)),
         userMessagePreview: promptPreview,
         assistantTextPreview:
           previewFromEvent(event, 'assistant_message') ??
@@ -335,7 +339,7 @@ function responseFramesForThread(thread: Thread): ResponseFrame[] {
         toolCallsByName: thread.toolCallsByName,
         tokens: eventTokens(event.payload.tokens) ?? { totalTokens: 0, cost: { total: 0 } },
       };
-      previousStart = endedAt;
+      previousBoundary = endedAt;
       return {
         id: `response:${threadKey(thread)}:${index}`,
         turn,
@@ -350,18 +354,20 @@ function responseFramesForThread(thread: Thread): ResponseFrame[] {
   );
 
   if (sessionEndedEvents.length > 1) {
-    let previousStart = thread.firstTs;
+    let previousBoundary = thread.firstTs;
     return sessionEndedEvents.map((event, idx) => {
       const index = idx + 1;
       const endedAt = event.timestamp;
+      const promptStartEvent = promptStartEventForFrame(runtimeEvents, previousBoundary, endedAt, idx === 0);
+      const startedAt = promptStartEvent?.timestamp ?? previousBoundary;
       const promptPreview =
         (index === 1 ? thread.requestPreview : undefined) ??
-        promptPreviewFromSessionStart(runtimeEvents, previousStart, endedAt, idx === 0);
+        (promptStartEvent ? promptPreviewFromEvent(promptStartEvent) : undefined);
       const turn: Turn = {
         index,
-        startedAt: previousStart,
+        startedAt,
         endedAt,
-        durationMs: Math.max(0, timestampMs(endedAt) - timestampMs(previousStart)),
+        durationMs: Math.max(0, timestampMs(endedAt) - timestampMs(startedAt)),
         userMessagePreview: promptPreview,
         assistantTextPreview: previewFromEvent(event, 'final_message'),
         assistantMessages: 1,
@@ -370,7 +376,7 @@ function responseFramesForThread(thread: Thread): ResponseFrame[] {
         toolCallsByName: thread.toolCallsByName,
         tokens: eventTokens(event.payload.usage_total) ?? { totalTokens: 0, cost: { total: 0 } },
       };
-      previousStart = endedAt;
+      previousBoundary = endedAt;
       return {
         id: `response:${threadKey(thread)}:${index}`,
         turn,
@@ -380,12 +386,16 @@ function responseFramesForThread(thread: Thread): ResponseFrame[] {
     });
   }
 
+  const finalEvent = finalAssistantEvent(runtimeEvents);
+  const endedAt = finalEvent?.timestamp ?? thread.lastTs;
+  const promptStartEvent = promptStartEventForFrame(runtimeEvents, thread.firstTs, endedAt, true);
+  const startedAt = promptStartEvent?.timestamp ?? thread.firstTs;
   const turn: Turn = {
     index: 1,
-    startedAt: thread.firstTs,
-    endedAt: thread.lastTs,
-    durationMs: thread.durationMs,
-    userMessagePreview: thread.requestPreview,
+    startedAt,
+    endedAt,
+    durationMs: Math.max(0, timestampMs(endedAt) - timestampMs(startedAt)),
+    userMessagePreview: thread.requestPreview ?? (promptStartEvent ? promptPreviewFromEvent(promptStartEvent) : undefined),
     assistantTextPreview: finalMessage,
     assistantMessages: finalMessage ? 1 : 0,
     toolCalls: thread.toolCallCount,
@@ -404,11 +414,15 @@ function responseFramesForThread(thread: Thread): ResponseFrame[] {
   ];
 }
 
-function finalAssistantMessage(events: Thread['runtimeEvents']): string | undefined {
-  const finalEvent = (events ?? [])
+function finalAssistantEvent(events: Thread['runtimeEvents']): NonNullable<Thread['runtimeEvents']>[number] | undefined {
+  return (events ?? [])
     .slice()
     .reverse()
     .find((event) => event.eventType === 'pi.session_ended');
+}
+
+function finalAssistantMessage(events: Thread['runtimeEvents']): string | undefined {
+  const finalEvent = finalAssistantEvent(events);
   return finalEvent ? previewFromEvent(finalEvent, 'final_message') : undefined;
 }
 
@@ -425,13 +439,13 @@ function previewFromEvent(event: NonNullable<Thread['runtimeEvents']>[number], k
   return typeof value === 'string' && value.trim() !== '' ? value : undefined;
 }
 
-function promptPreviewFromSessionStart(
+function promptStartEventForFrame(
   events: NonNullable<Thread['runtimeEvents']>,
   startedAt: string,
   endedAt: string,
   includeStart: boolean
-): string | undefined {
-  const startEvent = events
+): NonNullable<Thread['runtimeEvents']>[number] | undefined {
+  return events
     .filter(
       (event) =>
         event.eventType === 'pi.session_started' &&
@@ -440,7 +454,6 @@ function promptPreviewFromSessionStart(
     .slice()
     .reverse()
     .find((event) => promptPreviewFromEvent(event) !== undefined);
-  return startEvent ? promptPreviewFromEvent(startEvent) : undefined;
 }
 
 function promptPreviewFromEvent(event: NonNullable<Thread['runtimeEvents']>[number]): string | undefined {

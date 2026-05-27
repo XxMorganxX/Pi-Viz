@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { pathToFileURL } from 'node:url';
+import { tryServeStatic } from './static-server.js';
 import {
   buildSnapshot,
   completeAgent,
@@ -21,6 +22,7 @@ import {
 
 const PORT = Number(process.env.PORT ?? 5284);
 const TRACE_API_TOKEN = process.env.TRACE_API_TOKEN;
+const STATIC_DIR = process.env.AGENT_VIZ_STATIC_DIR;
 const SUPPORTED_TRACE_SCHEMA_VERSION = 'pi-trace.v1';
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
 
@@ -165,6 +167,10 @@ const server = createServer(async (req, res) => {
     );
     if (skillMatch && method === 'POST')
       return await handleSkillInvocation(req, res, skillMatch[1], skillMatch[2], skillMatch[3]);
+
+    if (STATIC_DIR && !url.pathname.startsWith('/api') && (await tryServeStatic(req, res, STATIC_DIR))) {
+      return;
+    }
 
     sendJson(res, 404, { error: 'Not found', path, method });
   } catch (e) {
@@ -464,7 +470,8 @@ async function handleSkillInvocation(
 const isCli = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isCli) {
   server.listen(PORT, () => {
-    console.log(`[watch-server] http://localhost:${PORT}`);
+    const staticLabel = STATIC_DIR ? ` serving ${STATIC_DIR}` : '';
+    console.log(`[watch-server] http://localhost:${PORT}${staticLabel}`);
   });
 }
 

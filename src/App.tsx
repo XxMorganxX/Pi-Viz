@@ -25,6 +25,7 @@ export default function App() {
   const [focusedResponseFrameId, setFocusedResponseFrameId] = useState<string | null>(null);
   const [cameraFocusNodeId, setCameraFocusNodeId] = useState<string | null>(null);
   const [expandedTraceFeed, setExpandedTraceFeed] = useState<TraceFeedNodeData | null>(null);
+  const [autoFormatVersion, setAutoFormatVersion] = useState(0);
   const [enteredIds, setEnteredIds] = useState<Set<string>>(new Set());
   const prevGraphRef = useRef<GraphModel | null>(null);
   const layoutCacheRef = useRef<{ key: string; graph: GraphModel } | null>(null);
@@ -161,6 +162,15 @@ export default function App() {
     [focusedResponseFrameId, graph.nodes, requestFrameIds, selectedId]
   );
 
+  const handleReload = useCallback(() => {
+    void ds.reload();
+  }, [ds]);
+
+  const handleFormat = useCallback(() => {
+    layoutCacheRef.current = null;
+    setAutoFormatVersion((version) => version + 1);
+  }, []);
+
   return (
     <div className="app">
       <Toolbar
@@ -176,7 +186,8 @@ export default function App() {
         onTraceUrlChange={ds.setTraceUrl}
         onConnectLive={ds.connectLive}
         onDisconnectLive={ds.disconnectLive}
-        onReload={ds.reload}
+        onReload={handleReload}
+        onFormat={handleFormat}
       />
       <div className={`canvas-wrap ${selectedData ? '' : 'no-panel'}`}>
         {ds.snapshot ? (
@@ -184,6 +195,7 @@ export default function App() {
             graph={graph}
             enteredIds={enteredIds}
             selectedId={selectedId}
+            autoFormatVersion={autoFormatVersion}
             focusedNodeId={cameraFocusNodeId}
             onFocusedNodeSettled={() => setCameraFocusNodeId(null)}
             onSelect={handleSelect}

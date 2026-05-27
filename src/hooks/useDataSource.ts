@@ -17,7 +17,7 @@ interface State {
 
 const TOKEN_STORAGE_KEY = 'agent-viz.traceAccessToken';
 const TRACE_URL_STORAGE_KEY = 'agent-viz.traceUrl';
-const DEFAULT_TRACE_URL = 'http://localhost:5284';
+const DEFAULT_TRACE_URL = '/api';
 
 function storedToken(): string {
   if (typeof window === 'undefined') return '';

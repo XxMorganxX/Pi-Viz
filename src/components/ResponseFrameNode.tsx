@@ -25,6 +25,7 @@ function ResponseFrameNodeImpl(props: NodeProps) {
     >
       <Handle type="target" position={Position.Top} />
       <SourceHandles count={sourceHandleCount(props.data)} />
+      <span className="response-frame-runtime">Runtime {fmtDuration(turn.durationMs)}</span>
       <div className="response-frame-header">
         <span className="response-frame-label">Prompt {turn.index}</span>
         <button
