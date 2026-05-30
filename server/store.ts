@@ -3,6 +3,30 @@ import { randomUUID } from 'node:crypto';
 export type MissionKind = 'linear' | 'halo' | 'unattributed';
 export type AgentRole = 'orchestrator' | 'subagent';
 export type EventStatus = 'ok' | 'error' | 'pending';
+export type MilestoneStatus = 'pending' | 'active' | 'done' | 'blocked';
+
+/**
+ * Universal progress unit synthesized from the pi-trace.v1 semantic vocabulary
+ * (`span.started`/`span.ended`/`state.transition`). Producer-agnostic: the shape
+ * is the standard, so the visualizer needs no per-system adapter.
+ */
+export interface Milestone {
+  id: string;
+  source: string;
+  title: string;
+  status: MilestoneStatus;
+  kind?: string;
+  parentId?: string;
+  order?: number;
+  threadId?: string;
+  agentId?: string;
+  startedAt?: string;
+  endedAt?: string;
+  durationMs?: number;
+  progress?: { completed: number; total: number };
+  detail?: string;
+  metadata?: Record<string, unknown>;
+}
 
 export interface TraceEvent {
   schemaVersion?: 'pi-trace.v1';
@@ -49,6 +73,12 @@ export interface AgentTokens {
   cost?: number;
 }
 
+/** Live model activity between turns: what the agent is doing right now. */
+export interface AgentActivity {
+  kind: 'thinking' | 'responding';
+  updatedAt: string;
+}
+
 export interface Agent {
   id: string;
   role: AgentRole;
@@ -65,6 +95,8 @@ export interface Agent {
   tokens?: AgentTokens;
   toolEvents: ToolEvent[];
   skillEvents: SkillEvent[];
+  /** Present only while the model is mid-turn; cleared at turn/session end. */
+  activity?: AgentActivity;
   metadata?: Record<string, unknown>;
 }
 
@@ -77,6 +109,7 @@ export interface Thread {
   endedAt?: string;
   requestPreview?: string;
   agents: Map<string, Agent>;
+  milestones: Map<string, Milestone>;
   tokens?: AgentTokens;
   metadata?: Record<string, unknown>;
 }
@@ -134,6 +167,7 @@ interface SnapshotSubagent {
   toolEvents?: ToolEvent[];
   skillEvents?: SkillEvent[];
   runtimeEvents?: TraceEvent[];
+  activity?: AgentActivity;
   metadata?: Record<string, unknown>;
 }
 
@@ -155,6 +189,7 @@ interface SnapshotThread {
   tokens: SnapshotTokenUsage;
   byRole?: { mainLoop?: SnapshotTokenUsage; subagent?: SnapshotTokenUsage };
   subagents: SnapshotSubagent[];
+  milestones: Milestone[];
   turns: unknown[];
   timeSeries?: Record<string, unknown>;
   systemPrompt?: string;
@@ -167,6 +202,7 @@ interface SnapshotThread {
   model?: string;
   requestPreview?: string;
   runtimeEvents?: TraceEvent[];
+  activity?: AgentActivity;
 }
 
 interface SnapshotTotals {
@@ -270,6 +306,7 @@ export function createThread(
     createdAt,
     requestPreview: input.requestPreview,
     agents: new Map(),
+    milestones: new Map(),
     metadata: input.metadata,
   };
   session.threads.set(id, thread);
@@ -393,6 +430,55 @@ export function recordToolCall(
   };
   a.toolEvents.push(evt);
   return evt;
+}
+
+/**
+ * Record a tool call by `toolCallId`, patching an existing event in place when
+ * one already exists (e.g. a pending event created on `tool_call_started`).
+ * Falls back to creating a fresh event so producers that only emit an end event
+ * stay correct.
+ */
+export function upsertToolCall(
+  sessionId: string,
+  threadId: string,
+  agentId: string,
+  toolCallId: string | undefined,
+  input: {
+    tool?: string;
+    timestamp?: string;
+    inputText?: string;
+    output?: string;
+    inputSchema?: Record<string, unknown>;
+    status?: EventStatus;
+    durationMs?: number;
+    metadata?: Record<string, unknown>;
+  }
+): ToolEvent | undefined {
+  const a = sessions.get(sessionId)?.threads.get(threadId)?.agents.get(agentId);
+  if (!a) return undefined;
+  const existing = toolCallId
+    ? a.toolEvents.find((e) => e.metadata?.toolCallId === toolCallId)
+    : undefined;
+  if (existing) {
+    if (input.tool && input.tool !== 'unknown') existing.tool = input.tool;
+    if (input.inputText !== undefined) existing.input = input.inputText.slice(0, 800);
+    if (input.output !== undefined) existing.output = input.output.slice(0, 800);
+    if (input.inputSchema !== undefined) existing.inputSchema = input.inputSchema;
+    if (input.status !== undefined) existing.status = input.status;
+    if (input.durationMs !== undefined) existing.durationMs = input.durationMs;
+    if (input.metadata) existing.metadata = { ...existing.metadata, ...input.metadata };
+    return existing;
+  }
+  return recordToolCall(sessionId, threadId, agentId, {
+    tool: input.tool ?? 'unknown',
+    timestamp: input.timestamp,
+    inputText: input.inputText,
+    output: input.output,
+    inputSchema: input.inputSchema,
+    status: input.status,
+    durationMs: input.durationMs,
+    metadata: input.metadata,
+  });
 }
 
 export function recordSkillInvocation(
@@ -581,6 +667,85 @@ function ensureTraceEntities(event: TraceEvent): Agent {
   return agent;
 }
 
+function stringValue(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() !== '' ? value : undefined;
+}
+
+function milestoneSource(event: TraceEvent): string {
+  return stringValue(event.metadata?.source) ?? stringValue(event.metadata?.system) ?? 'pi';
+}
+
+function applySpanStarted(thread: Thread, event: TraceEvent): void {
+  const spanId = stringValue(event.payload.spanId);
+  if (!spanId) return;
+  const existing = thread.milestones.get(spanId);
+  const milestone: Milestone = existing ?? {
+    id: spanId,
+    source: milestoneSource(event),
+    title: spanId,
+    status: 'active',
+    threadId: event.threadId,
+    agentId: event.agentId,
+  };
+  milestone.title = stringValue(event.payload.name) ?? milestone.title;
+  milestone.kind = stringValue(event.payload.kind) ?? milestone.kind;
+  milestone.parentId = stringValue(event.payload.parentSpanId) ?? milestone.parentId;
+  milestone.startedAt = milestone.startedAt ?? event.timestamp;
+  milestone.detail = stringValue(event.payload.inputPreview) ?? milestone.detail;
+  if (milestone.status !== 'done' && milestone.status !== 'blocked') milestone.status = 'active';
+  thread.milestones.set(spanId, milestone);
+}
+
+function applySpanEnded(thread: Thread, event: TraceEvent): void {
+  const spanId = stringValue(event.payload.spanId);
+  if (!spanId) return;
+  const milestone =
+    thread.milestones.get(spanId) ??
+    ({
+      id: spanId,
+      source: milestoneSource(event),
+      title: spanId,
+      status: 'active',
+      threadId: event.threadId,
+      agentId: event.agentId,
+    } as Milestone);
+  milestone.endedAt = event.timestamp;
+  if (milestone.startedAt) {
+    milestone.durationMs = durationMs(milestone.startedAt, event.timestamp);
+  }
+  milestone.status = event.payload.status === 'error' ? 'blocked' : 'done';
+  milestone.detail = stringValue(event.payload.error) ?? stringValue(event.payload.outputPreview) ?? milestone.detail;
+  thread.milestones.set(spanId, milestone);
+}
+
+function applyStateTransition(thread: Thread, event: TraceEvent): void {
+  const to = stringValue(event.payload.to);
+  if (!to) return;
+  const key = `state:${stringValue(event.payload.stateMachineId) ?? event.agentId}`;
+  const existing = thread.milestones.get(key);
+  const status =
+    event.payload.status === 'error'
+      ? 'blocked'
+      : event.payload.status === 'done'
+        ? 'done'
+        : 'active';
+  const milestone: Milestone = existing ?? {
+    id: key,
+    source: milestoneSource(event),
+    title: to,
+    status,
+    kind: 'state',
+    threadId: event.threadId,
+    agentId: event.agentId,
+    startedAt: event.timestamp,
+  };
+  milestone.title = to;
+  milestone.kind = 'state';
+  milestone.status = status;
+  milestone.detail = stringValue(event.payload.reason) ?? milestone.detail;
+  thread.milestones.set(key, milestone);
+}
+
 function adaptTraceEvent(event: TraceEvent): void {
   const agent = ensureTraceEntities(event);
   switch (event.eventType) {
@@ -614,6 +779,28 @@ function adaptTraceEvent(event: TraceEvent): void {
       });
       break;
     }
+    case 'pi.tool_call_started': {
+      const toolName =
+        typeof event.payload.tool_name === 'string'
+          ? event.payload.tool_name
+          : typeof event.payload.tool === 'string'
+            ? event.payload.tool
+            : 'unknown';
+      const toolCallId = traceToolCallId(event);
+      upsertToolCall(event.sessionId, event.threadId, event.agentId, toolCallId, {
+        tool: toolName,
+        timestamp: event.timestamp,
+        inputText: eventPayloadString(event.payload.args),
+        inputSchema: agent.toolInputSchemas[toolName],
+        status: 'pending',
+        metadata: {
+          ...event.metadata,
+          traceEventId: event.eventId,
+          toolCallId,
+        },
+      });
+      break;
+    }
     case 'pi.tool_call_ended': {
       const toolName =
         typeof event.payload.tool_name === 'string'
@@ -622,7 +809,7 @@ function adaptTraceEvent(event: TraceEvent): void {
             ? event.payload.tool
             : 'unknown';
       const toolCallId = traceToolCallId(event);
-      recordToolCall(event.sessionId, event.threadId, event.agentId, {
+      upsertToolCall(event.sessionId, event.threadId, event.agentId, toolCallId, {
         tool: toolName,
         timestamp: event.timestamp,
         inputText: eventPayloadString(event.payload.args),
@@ -674,7 +861,16 @@ function adaptTraceEvent(event: TraceEvent): void {
       }
       break;
     }
+    case 'pi.thinking_delta':
+    case 'pi.text_delta': {
+      agent.activity = {
+        kind: event.eventType === 'pi.thinking_delta' ? 'thinking' : 'responding',
+        updatedAt: event.timestamp,
+      };
+      break;
+    }
     case 'pi.turn_ended': {
+      agent.activity = undefined;
       const tokens = event.payload.tokens as AgentTokens | undefined;
       if (tokens && typeof tokens === 'object') {
         completeAgent(event.sessionId, event.threadId, event.agentId, {
@@ -692,6 +888,7 @@ function adaptTraceEvent(event: TraceEvent): void {
       break;
     }
     case 'pi.session_ended': {
+      agent.activity = undefined;
       const usage = event.payload.usage_total as AgentTokens | undefined;
       const tokens =
         usage && typeof usage === 'object'
@@ -728,6 +925,16 @@ function adaptTraceEvent(event: TraceEvent): void {
       });
       break;
     }
+    case 'span.started':
+    case 'span.ended':
+    case 'state.transition': {
+      const thread = getThread(event.sessionId, event.threadId);
+      if (!thread) break;
+      if (event.eventType === 'span.started') applySpanStarted(thread, event);
+      else if (event.eventType === 'span.ended') applySpanEnded(thread, event);
+      else applyStateTransition(thread, event);
+      break;
+    }
     default:
       break;
   }
@@ -739,6 +946,27 @@ export function recordTraceEvents(events: TraceEvent[]): TraceEvent[] {
     adaptTraceEvent(event);
   }
   return events;
+}
+
+function materializeMilestones(thread: Thread): Milestone[] {
+  const all = [...thread.milestones.values()];
+  const childCounts = new Map<string, { completed: number; total: number }>();
+  for (const milestone of all) {
+    if (!milestone.parentId) continue;
+    const tally = childCounts.get(milestone.parentId) ?? { completed: 0, total: 0 };
+    tally.total += 1;
+    if (milestone.status === 'done') tally.completed += 1;
+    childCounts.set(milestone.parentId, tally);
+  }
+
+  const orderByParent = new Map<string, number>();
+  return all.map((milestone) => {
+    const parentKey = milestone.parentId ?? '';
+    const order = orderByParent.get(parentKey) ?? 0;
+    orderByParent.set(parentKey, order + 1);
+    const progress = childCounts.get(milestone.id);
+    return { ...milestone, order, progress };
+  });
 }
 
 /**
@@ -828,6 +1056,7 @@ export function buildSnapshot(): Snapshot {
           availableSkills: sa.availableSkills,
           toolEvents: sa.toolEvents,
           skillEvents: sa.skillEvents,
+          activity: sa.activity,
           runtimeEvents:
             spawnToolCallId !== undefined
               ? runtimeEventsForSyntheticSubagent(threadRuntimeEvents, sa.parentAgentId ?? '', spawnToolCallId)
@@ -855,6 +1084,7 @@ export function buildSnapshot(): Snapshot {
           cost: { total: threadCost },
         },
         subagents: snapshotSubagents,
+        milestones: materializeMilestones(thread),
         turns: [],
         systemPrompt: orchestrator?.systemPrompt,
         availableTools: orchestrator?.availableTools,
@@ -866,6 +1096,7 @@ export function buildSnapshot(): Snapshot {
         model: orchestrator?.model,
         requestPreview: thread.requestPreview,
         runtimeEvents: threadRuntimeEvents,
+        activity: orchestrator?.activity,
       };
       threadsOut.push(snapshotThread);
       threadKeys.push(`${thread.channelId}/${thread.threadTs}`);

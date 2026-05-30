@@ -205,6 +205,30 @@ button.primary {
 .detail-panel .event .status.ok { background: rgba(106, 169, 255, 0.15); color: #6aa9ff; }
 .detail-panel .event .status.error { background: rgba(255, 90, 90, 0.15); color: #ff5a5a; }
 .detail-panel .event .status.pending { background: rgba(200, 200, 200, 0.15); color: var(--text-dim); }
+
+/* Live model activity badge on agent nodes. */
+.agent-activity {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 6px;
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  color: var(--text-dim);
+}
+.agent-activity .agent-activity-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: agent-activity-pulse 1.1s ease-in-out infinite;
+}
+.agent-activity.activity-thinking { color: #c8a2ff; }
+.agent-activity.activity-responding { color: #6aa9ff; }
+@keyframes agent-activity-pulse {
+  0%, 100% { opacity: 0.3; transform: scale(0.8); }
+  50% { opacity: 1; transform: scale(1.15); }
+}
 .detail-panel .collapsible-trace {
   margin: 8px 0 4px;
   background: var(--bg);
@@ -504,6 +528,27 @@ button.primary {
 .node-subagent.provider-openai { border-left-color: var(--openai); background: rgba(22, 214, 165, 0.11); }
 .node-subagent.provider-anthropic { border-left-color: var(--anthropic); background: rgba(255, 138, 102, 0.11); }
 .node-subagent.exit-nonzero { border: 1px solid var(--danger); }
+
+.node-milestone { border-left: 6px solid var(--other); background: rgba(155, 163, 181, 0.08); }
+.node-milestone.milestone-active { border-left-color: var(--anthropic); background: rgba(255, 138, 102, 0.1); }
+.node-milestone.milestone-done { border-left-color: var(--openai); background: rgba(22, 214, 165, 0.1); }
+.node-milestone.milestone-blocked { border-left-color: var(--danger); background: rgba(255, 92, 92, 0.1); }
+.node-milestone .milestone-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 14px; }
+.node-milestone .milestone-head .title { margin-bottom: 0; }
+.milestone-chip {
+  font-size: 18px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: rgba(155, 163, 181, 0.2);
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.milestone-chip-active { background: rgba(255, 138, 102, 0.22); color: var(--anthropic); }
+.milestone-chip-done { background: rgba(22, 214, 165, 0.22); color: var(--openai); }
+.milestone-chip-blocked { background: rgba(255, 92, 92, 0.22); color: var(--danger); }
 
 .node-trace-feed {
   width: 860px;

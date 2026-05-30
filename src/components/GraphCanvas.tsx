@@ -19,6 +19,7 @@ import ThreadNode from './ThreadNode';
 import ResponseFrameNode from './ResponseFrameNode';
 import AgentExecutionNode from './AgentExecutionNode';
 import TraceFeedNode from './TraceFeedNode';
+import MilestoneNode from './MilestoneNode';
 import { graphInteractionProps } from '../lib/graph-interactions';
 import type { GraphModel, NodeData } from '../lib/types';
 import {
@@ -45,6 +46,7 @@ const nodeTypes: NodeTypes = {
   orchestrator: AgentExecutionNode,
   subagent: AgentExecutionNode,
   traceFeed: TraceFeedNode,
+  milestone: MilestoneNode,
 };
 
 interface Props {
