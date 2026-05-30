@@ -89,7 +89,7 @@ Server-Sent-Events stream. The server emits:
 | Event              | Payload                                                          |
 | ------------------ | ---------------------------------------------------------------- |
 | `hello`            | `{ liveSessions }` (sent once on connect)                        |
-| `snapshot`         | `{ generatedAt, reason }` (debounced 150 ms)                     |
+| `snapshot`         | `{ generatedAt, reason }` (debounced 80 ms)                      |
 | `session.created`  | `{ sessionId, missionId }`                                       |
 | `session.completed`| `{ sessionId }`                                                  |
 | `session.deleted`  | `{ sessionId }`                                                  |
@@ -182,12 +182,41 @@ recognizes this optional extension vocabulary:
 
 | Event type | Required payload | Optional payload | UI use |
 | ---------- | ---------------- | ---------------- | ------ |
-| `span.started` | `spanId`, `name` | `parentSpanId`, `kind`, `inputPreview` | Timed execution phases |
-| `span.ended` | `spanId` | `status`, `outputPreview`, `error` | Span completion and duration |
+| `span.started` | `spanId`, `name` | `parentSpanId`, `kind`, `inputPreview` | Timed execution phases → **milestone** |
+| `span.ended` | `spanId` | `status`, `outputPreview`, `error` | Span completion and duration → **milestone** |
 | `context.part` | `role`, `label` | `partId`, `contentPreview`, `content`, `tokenCount`, `sourceIds`, `redacted` | Context inspection |
 | `context.snapshot` | `label` | `snapshotId`, `parts`, `totalTokens`, `truncated` | Model-call context boundary |
-| `state.transition` | `to` | `from`, `reason`, `status` | State-machine or planner view |
+| `state.transition` | `to` | `from`, `reason`, `status`, `stateMachineId` | State-machine or planner view → **milestone** |
 | `artifact.created` | `kind`, `label` | `artifactId`, `uri`, `contentPreview` | Output and evidence trail |
+
+#### Universal milestones
+
+`span.started`/`span.ended` and `state.transition` are the universal milestone
+vocabulary. The store synthesizes them into `SnapshotThread.milestones`, a
+producer-agnostic progress structure rendered as a first-class milestone node.
+Any system (Superpowers plans, GSD roadmaps, a Pi planner) participates by
+emitting these events — no per-system adapter lives in the visualizer.
+
+Each milestone has the shape:
+
+```ts
+{
+  id: string;              // = spanId (idempotent on re-post), or state:<stateMachineId|agentId>
+  source: string;          // provenance from metadata.source, default "pi" (display only)
+  title: string;           // span name / state `to`
+  status: 'pending' | 'active' | 'done' | 'blocked';
+  kind?: string;           // span kind, or "state"
+  parentId?: string;       // = parentSpanId (nesting)
+  order?: number;          // emission order within a parent
+  startedAt?, endedAt?, durationMs?;
+  progress?: { completed, total };   // rolled up from child milestones
+  detail?: string;         // error / outputPreview / transition reason
+}
+```
+
+A `span.started` with no matching `span.ended` stays `active`; an end with
+`status: "error"` becomes `blocked`, otherwise `done`. Re-posting `span.started`
+with the same `spanId` patches in place.
 
 Harnesses do not need to emit these directly. The recommended integration is to
 use `@agent-viz/pi-trace-extension`, whose typed helper methods generate these
@@ -507,8 +536,12 @@ terminate the connection with a `500`.
 - The store is **in-memory only**. Restarting the sidecar wipes all live
   sessions. Long-term persistence is intentionally out of scope — the
   visualizer is a runtime view, not an archive.
-- SSE `snapshot` broadcasts are debounced 150 ms so a burst of tool-call
-  events produces at most one client refresh per ~150 ms window.
+- SSE `snapshot` broadcasts are debounced 80 ms so a burst of tool-call
+  events produces at most one client refresh per ~80 ms window.
+- `pi.tool_call_started` is rendered as a `pending` tool event and upserted by
+  `toolCallId` when `pi.tool_call_ended` arrives, so tools appear live and flip
+  to `ok`/`error` in place. `pi.text_delta`/`pi.thinking_delta` set the agent's
+  live `activity` (`responding`/`thinking`), cleared at turn/session end.
 - Tool/skill `input`/`output`/`args` are truncated to 800 chars on the way
   in. If you need full payloads, store them elsewhere and link via
   `metadata`.

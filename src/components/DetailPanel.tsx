@@ -31,7 +31,32 @@ export default function DetailPanel({ data, onClose }: Props) {
       {data.kind === 'orchestrator' && <AgentExecutionDetail data={data} />}
       {data.kind === 'subagent' && <AgentExecutionDetail data={data} />}
       {data.kind === 'traceFeed' && <TraceFeedDetail data={data} />}
+      {data.kind === 'milestone' && <MilestoneDetail data={data} />}
     </aside>
+  );
+}
+
+function MilestoneDetail({ data }: { data: import('../lib/types').MilestoneNodeData }) {
+  const m = data.milestone;
+  return (
+    <>
+      <h2 style={{ marginTop: 8 }}>{m.title}</h2>
+      <div className="kv">
+        <Row k="status" v={m.status} />
+        {m.kind && <Row k="kind" v={m.kind} />}
+        <Row k="source" v={m.source} />
+        {m.progress && <Row k="progress" v={`${m.progress.completed}/${m.progress.total}`} />}
+        {m.startedAt && <Row k="started" v={fmtTimestamp(m.startedAt)} />}
+        {m.endedAt && <Row k="ended" v={fmtTimestamp(m.endedAt)} />}
+        {m.durationMs != null && <Row k="duration" v={fmtDuration(m.durationMs)} />}
+      </div>
+      {m.detail && (
+        <>
+          <h3>Detail</h3>
+          <div className="prompt-box">{m.detail}</div>
+        </>
+      )}
+    </>
   );
 }
 

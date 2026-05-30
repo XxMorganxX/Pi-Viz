@@ -43,7 +43,7 @@ function notifySnapshot(reason: string) {
   if (snapshotDebounce) clearTimeout(snapshotDebounce);
   snapshotDebounce = setTimeout(() => {
     broadcast('snapshot', { generatedAt: new Date().toISOString(), reason });
-  }, 150);
+  }, 80);
 }
 
 async function readJsonBody(req: IncomingMessage): Promise<unknown> {

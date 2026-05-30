@@ -11,6 +11,8 @@ const AGENT_EXECUTION_W = 620;
 const AGENT_EXECUTION_H = 210;
 const TRACE_FEED_W = 860;
 const TRACE_FEED_H = 760;
+const MILESTONE_W = 520;
+const MILESTONE_H = 170;
 const RESPONSE_FRAME_PAD_X = 70;
 const RESPONSE_FRAME_PAD_TOP = 190;
 const RESPONSE_FRAME_PAD_BOTTOM = 150;
@@ -80,6 +82,7 @@ function sizeForNode(node: GraphNode): { width: number; height: number } {
   if (node.category === 'sessionRoot') return { width: SESSION_ROOT_W, height: SESSION_ROOT_H };
   if (node.category === 'responseFrame') return { width: RESPONSE_FRAME_W, height: RESPONSE_FRAME_H };
   if (node.category === 'agentExecution') return { width: AGENT_EXECUTION_W, height: AGENT_EXECUTION_H };
+  if (node.category === 'milestone') return { width: MILESTONE_W, height: MILESTONE_H };
   return { width: TRACE_FEED_W, height: TRACE_FEED_H };
 }
 

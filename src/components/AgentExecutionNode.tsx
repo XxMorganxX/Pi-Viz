@@ -31,6 +31,12 @@ function AgentExecutionNodeImpl(props: NodeProps) {
         {fmtTokens(view.tokens?.totalTokens)} tok · {fmtCost(view.tokens?.cost?.total)}
         {failed ? ` · exit ${view.exitCode}` : ''}
       </div>
+      {view.activity ? (
+        <div className={`agent-activity activity-${view.activity.kind}`}>
+          <span className="agent-activity-dot" />
+          {view.activity.kind === 'thinking' ? 'thinking…' : 'responding…'}
+        </div>
+      ) : null}
     </div>
   );
 }

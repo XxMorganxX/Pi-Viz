@@ -40,7 +40,9 @@ This is the load-bearing design choice: the website only exposes API-backed sess
 
 ### SSE refresh model
 
-The sidecar emits fine-grained events (`session.created`, `tool.called`, etc.) but the frontend only listens for a debounced `snapshot` event and re-fetches `/data`. Bursts of tool calls collapse to one client refresh per ~150 ms. Don't try to apply individual events client-side — the fine-grained events exist for harness debuggers, not the UI.
+The sidecar emits fine-grained events (`session.created`, `tool.called`, etc.) but the frontend only listens for a debounced `snapshot` event and re-fetches `/data`. Bursts of tool calls collapse to one client refresh per ~80 ms. Don't try to apply individual events client-side — the fine-grained events exist for harness debuggers, not the UI.
+
+`adaptTraceEvent` (`server/store.ts`) builds the renderable tree incrementally so the run unfolds live: `pi.tool_call_started` creates a `pending` `ToolEvent` keyed by `toolCallId`, and `pi.tool_call_ended` *upserts* that same event (match on `metadata.toolCallId`) to `ok`/`error` — no duplicate. `pi.text_delta`/`pi.thinking_delta` set `agent.activity` (`responding`/`thinking`), cleared on `turn_ended`/`session_ended`; the snapshot surfaces it as a pulsing badge on the agent node.
 
 ### Live ingest invariants
 

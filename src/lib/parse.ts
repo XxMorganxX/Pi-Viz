@@ -280,6 +280,44 @@ export function buildGraph(
           accentColor: richOutlineColor(subagentAccent),
         });
       });
+
+      const threadMilestones = thread.milestones ?? [];
+      const milestoneRootParentId = collapseSessionRoot ? missionId : tid;
+      const milestoneNodeId = (id: string) => `milestone:${threadKey(thread)}:${id}`;
+      const milestoneIds = new Set(threadMilestones.map((m) => m.id));
+      const lastSiblingByParent = new Map<string, string>();
+      threadMilestones.forEach((milestone) => {
+        const nodeId = milestoneNodeId(milestone.id);
+        const parentNodeId =
+          milestone.parentId && milestoneIds.has(milestone.parentId)
+            ? milestoneNodeId(milestone.parentId)
+            : milestoneRootParentId;
+        nodes.push({
+          id: nodeId,
+          type: 'milestone',
+          category: 'milestone',
+          data: { kind: 'milestone', milestone },
+          position: { x: 0, y: 0 },
+          parentId: parentNodeId,
+        });
+        edges.push({
+          id: `e:${parentNodeId}->${nodeId}`,
+          source: parentNodeId,
+          target: nodeId,
+          kind: 'containment',
+        });
+        const siblingKey = milestone.parentId ?? '';
+        const previousSibling = lastSiblingByParent.get(siblingKey);
+        if (previousSibling) {
+          edges.push({
+            id: `e:${previousSibling}->${nodeId}:seq`,
+            source: previousSibling,
+            target: nodeId,
+            kind: 'sequence',
+          });
+        }
+        lastSiblingByParent.set(siblingKey, nodeId);
+      });
     }
   }
 

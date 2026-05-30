@@ -30,6 +30,31 @@ export interface Mission {
   byRole?: { mainLoop?: TokenUsage; subagent?: TokenUsage };
 }
 
+export type MilestoneStatus = 'pending' | 'active' | 'done' | 'blocked';
+
+/**
+ * Universal progress unit synthesized from pi-trace.v1 semantic events
+ * (`span.started`/`span.ended`/`state.transition`). Producer-agnostic — the
+ * shape is the standard, so the visualizer renders it without a per-system adapter.
+ */
+export interface Milestone {
+  id: string;
+  source: string;
+  title: string;
+  status: MilestoneStatus;
+  kind?: string;
+  parentId?: string;
+  order?: number;
+  threadId?: string;
+  agentId?: string;
+  startedAt?: string;
+  endedAt?: string;
+  durationMs?: number;
+  progress?: { completed: number; total: number };
+  detail?: string;
+  metadata?: Record<string, unknown>;
+}
+
 export interface ToolEvent {
   id: string;
   tool: string;
@@ -64,6 +89,12 @@ export interface TraceEvent {
   metadata?: Record<string, unknown>;
 }
 
+/** Live model activity between turns. Present only in live-mode snapshots. */
+export interface AgentActivity {
+  kind: 'thinking' | 'responding';
+  updatedAt: string;
+}
+
 export interface Subagent {
   runId: string;
   agent: string;
@@ -83,6 +114,7 @@ export interface Subagent {
   toolEvents?: ToolEvent[];
   skillEvents?: SkillEvent[];
   runtimeEvents?: TraceEvent[];
+  activity?: AgentActivity;
   metadata?: Record<string, unknown>;
 }
 
@@ -120,6 +152,8 @@ export interface Thread {
   tokens: TokenUsage;
   byRole?: { mainLoop?: TokenUsage; subagent?: TokenUsage };
   subagents: Subagent[];
+  /** Universal milestones synthesized from semantic trace events. Optional — only live snapshots carry them. */
+  milestones?: Milestone[];
   turns: Turn[];
   /** Live ingest fields describing the orchestrator agent. Only present in live-mode snapshots. */
   systemPrompt?: string;
@@ -131,6 +165,7 @@ export interface Thread {
   agentType?: string;
   model?: string;
   runtimeEvents?: TraceEvent[];
+  activity?: AgentActivity;
 }
 
 export interface Snapshot {
@@ -168,7 +203,8 @@ export type NodeCategory =
   | 'sessionRoot'
   | 'responseFrame'
   | 'agentExecution'
-  | 'traceDisplay';
+  | 'traceDisplay'
+  | 'milestone';
 
 export interface MissionNodeData {
   kind: 'mission';
@@ -204,14 +240,26 @@ export interface ResponseFrameNodeData {
   promptPreview?: string;
   assistantPreview?: string;
 }
-export type NodeKind = 'mission' | 'thread' | 'responseFrame' | 'orchestrator' | 'subagent' | 'traceFeed';
+export interface MilestoneNodeData {
+  kind: 'milestone';
+  milestone: Milestone;
+}
+export type NodeKind =
+  | 'mission'
+  | 'thread'
+  | 'responseFrame'
+  | 'orchestrator'
+  | 'subagent'
+  | 'traceFeed'
+  | 'milestone';
 export type NodeData =
   | MissionNodeData
   | ThreadNodeData
   | ResponseFrameNodeData
   | OrchestratorNodeData
   | SubagentNodeData
-  | TraceFeedNodeData;
+  | TraceFeedNodeData
+  | MilestoneNodeData;
 
 export interface GraphNode {
   id: string;

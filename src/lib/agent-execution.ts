@@ -1,4 +1,5 @@
 import type {
+  AgentActivity,
   OrchestratorNodeData,
   SkillEvent,
   SubagentNodeData,
@@ -23,6 +24,7 @@ export interface AgentExecutionView {
   toolEvents?: ToolEvent[];
   skillEvents?: SkillEvent[];
   runtimeEvents?: TraceEvent[];
+  activity?: AgentActivity;
   sourcePath?: string | null;
 }
 
@@ -43,6 +45,7 @@ export function agentExecutionView(data: OrchestratorNodeData | SubagentNodeData
       toolEvents: thread.toolEvents,
       skillEvents: thread.skillEvents,
       runtimeEvents: thread.runtimeEvents,
+      activity: thread.activity,
       sourcePath: thread.source?.sessionPath,
     };
   }
@@ -64,6 +67,7 @@ export function agentExecutionView(data: OrchestratorNodeData | SubagentNodeData
     toolEvents: subagent.toolEvents,
     skillEvents: subagent.skillEvents,
     runtimeEvents: subagent.runtimeEvents,
+    activity: subagent.activity,
     sourcePath: subagent.metaPath,
   };
 }
