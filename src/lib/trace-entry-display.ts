@@ -13,15 +13,19 @@ export interface TraceEntryDisplayBlock {
 export function traceEntryDisplayBlocks(entry: TraceFeedEntry): TraceEntryDisplayBlock[] {
   const blocks: TraceEntryDisplayBlock[] = [];
 
-  if (entry.inputSchema) {
+  // The tool call's own input arguments occupy the primary dropdown — the slot the
+  // input schema used to fill. The schema now lives behind the info affordance
+  // (see traceEntrySchemaText) so the call data is what's one click away.
+  if (entry.type === 'tool' && entry.inputText) {
+    const parsedInput = parseJson(entry.inputText);
     blocks.push({
-      id: 'input-schema',
-      title: 'Input schema',
-      text: JSON.stringify(entry.inputSchema, null, 2),
-      tone: 'json',
+      id: 'tool-call',
+      title: 'Tool call',
+      text: parsedInput.ok ? JSON.stringify(parsedInput.value, null, 2) : entry.inputText.trimEnd(),
+      tone: parsedInput.ok ? 'json' : 'plain',
       defaultOpen: false,
-      collapsedSummary: 'Show Input schema',
-      expandedSummary: 'Hide Input schema',
+      collapsedSummary: 'Show Tool call',
+      expandedSummary: 'Hide Tool call',
     });
   }
 
@@ -60,9 +64,16 @@ export function traceEntryDisplayBlocks(entry: TraceFeedEntry): TraceEntryDispla
   ]);
 }
 
+/** The tool's input schema, formatted for the info affordance. Not a dropdown block. */
+export function traceEntrySchemaText(entry: TraceFeedEntry): string | undefined {
+  return entry.inputSchema ? JSON.stringify(entry.inputSchema, null, 2) : undefined;
+}
+
 export function traceEntryPreviewText(entry: TraceFeedEntry): string {
   const blocks = traceEntryDisplayBlocks(entry);
-  const firstBlock = blocks.find((block) => block.id !== 'input-schema') ?? blocks[0];
+  // Prefer the result/output in the one-line preview; fall back to the call data
+  // (e.g. a still-pending tool that has no output yet).
+  const firstBlock = blocks.find((block) => block.id !== 'tool-call') ?? blocks[0];
   if (!firstBlock) return '';
 
   const text = firstBlock.text

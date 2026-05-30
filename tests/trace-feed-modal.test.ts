@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { buildTraceFeedModalModel, traceEntryDisplayBlocks } from '../src/lib/trace-feed-modal.js';
+import { buildTraceFeedModalModel, traceEntryDisplayBlocks, traceEntrySchemaText } from '../src/lib/trace-feed-modal.js';
 import type { TraceFeedEntry, TraceFeedNodeData } from '../src/lib/types.js';
 
 const traceFeed: TraceFeedNodeData = {
@@ -94,13 +94,14 @@ test('trace feed modal display blocks unwrap tool content text', () => {
   ]);
 });
 
-test('trace feed modal display blocks include tool input schema before output', () => {
+test('trace feed modal shows the tool call data as the primary block, not the schema', () => {
   const entry: TraceFeedEntry = {
     id: 'tool-read',
     type: 'tool',
     label: 'read',
     timestamp: '2026-05-25T00:00:04.000Z',
     status: 'ok',
+    inputText: JSON.stringify({ path: 'src/index.ts' }),
     inputSchema: {
       type: 'object',
       properties: {
@@ -113,13 +114,13 @@ test('trace feed modal display blocks include tool input schema before output', 
 
   assert.deepEqual(traceEntryDisplayBlocks(entry), [
     {
-      id: 'input-schema',
-      title: 'Input schema',
-      text: JSON.stringify(entry.inputSchema, null, 2),
+      id: 'tool-call',
+      title: 'Tool call',
+      text: JSON.stringify({ path: 'src/index.ts' }, null, 2),
       tone: 'json',
       defaultOpen: false,
-      collapsedSummary: 'Show Input schema',
-      expandedSummary: 'Hide Input schema',
+      collapsedSummary: 'Show Tool call',
+      expandedSummary: 'Hide Tool call',
     },
     {
       id: 'text',
@@ -131,4 +132,22 @@ test('trace feed modal display blocks include tool input schema before output', 
       expandedSummary: 'Hide Output',
     },
   ]);
+});
+
+test('the tool input schema is exposed separately (behind the info affordance), not as a block', () => {
+  const entry: TraceFeedEntry = {
+    id: 'tool-read',
+    type: 'tool',
+    label: 'read',
+    timestamp: '2026-05-25T00:00:04.000Z',
+    status: 'ok',
+    inputSchema: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },
+    text: 'ok',
+  };
+
+  // No schema block among the dropdowns…
+  assert.ok(traceEntryDisplayBlocks(entry).every((block) => block.id !== 'input-schema'));
+  // …it's reachable through the dedicated accessor instead.
+  assert.equal(traceEntrySchemaText(entry), JSON.stringify(entry.inputSchema, null, 2));
+  assert.equal(traceEntrySchemaText({ ...entry, inputSchema: undefined }), undefined);
 });

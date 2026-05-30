@@ -1,5 +1,5 @@
 import type { TraceFeedEntry, TraceFeedNodeData } from './types';
-export { traceEntryDisplayBlocks } from './trace-entry-display';
+export { traceEntryDisplayBlocks, traceEntrySchemaText } from './trace-entry-display';
 export type { TraceEntryDisplayBlock } from './trace-entry-display';
 
 export interface TraceFeedModalSummary {

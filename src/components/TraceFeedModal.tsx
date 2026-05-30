@@ -1,5 +1,5 @@
-import { useEffect, useMemo } from 'react';
-import { traceEntryDisplayBlocks } from '../lib/trace-entry-display';
+import { useEffect, useMemo, useState } from 'react';
+import { traceEntryDisplayBlocks, traceEntrySchemaText } from '../lib/trace-entry-display';
 import { buildTraceFeedModalModel } from '../lib/trace-feed-modal';
 import type { TraceFeedEntry, TraceFeedNodeData } from '../lib/types';
 
@@ -99,6 +99,8 @@ function Stat({ label, value, tone = 'default' }: { label: string; value: number
 
 function TraceRow({ entry }: { entry: TraceFeedEntry }) {
   const displayBlocks = traceEntryDisplayBlocks(entry);
+  const schemaText = traceEntrySchemaText(entry);
+  const [schemaOpen, setSchemaOpen] = useState(false);
 
   return (
     <article className={traceModalRowClassName(entry)}>
@@ -110,8 +112,26 @@ function TraceRow({ entry }: { entry: TraceFeedEntry }) {
             {entry.label}
             <TraceDuration entry={entry} />
           </span>
+          {schemaText && (
+            <button
+              type="button"
+              className={`trace-modal-schema-toggle ${schemaOpen ? 'open' : ''}`}
+              aria-expanded={schemaOpen}
+              aria-label={schemaOpen ? 'Hide input schema' : 'Show input schema'}
+              title="Input schema"
+              onClick={() => setSchemaOpen((open) => !open)}
+            >
+              i
+            </button>
+          )}
           {entry.status && <span className={`trace-modal-status ${entry.status}`}>{entry.status}</span>}
         </div>
+        {schemaText && schemaOpen && (
+          <div className="trace-modal-schema">
+            <div className="trace-modal-schema-title">Input schema</div>
+            <pre>{schemaText}</pre>
+          </div>
+        )}
         {displayBlocks.length > 0 && (
           <div className="trace-modal-blocks">
             {displayBlocks.map((block) => (

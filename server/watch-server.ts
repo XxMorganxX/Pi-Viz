@@ -26,6 +26,13 @@ const STATIC_DIR = process.env.AGENT_VIZ_STATIC_DIR;
 const SUPPORTED_TRACE_SCHEMA_VERSION = 'pi-trace.v1';
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
 
+class PayloadTooLargeError extends Error {
+  constructor() {
+    super('Request body too large');
+    this.name = 'PayloadTooLargeError';
+  }
+}
+
 interface SseClient {
   id: number;
   write: (line: string) => void;
@@ -50,16 +57,24 @@ async function readJsonBody(req: IncomingMessage): Promise<unknown> {
   return new Promise((resolveBody, reject) => {
     const chunks: Buffer[] = [];
     let size = 0;
+    let settled = false;
     req.on('data', (chunk: Buffer) => {
+      if (settled) return;
       size += chunk.length;
       if (size > MAX_BODY_BYTES) {
-        reject(new Error('Body too large'));
-        req.destroy();
+        // Reject without destroying the socket so the handler can still write a
+        // clean 413 response. Destroying here resets the connection mid-upload,
+        // which a fronting proxy (e.g. Railway) surfaces to the client as a 502.
+        settled = true;
+        chunks.length = 0;
+        reject(new PayloadTooLargeError());
         return;
       }
       chunks.push(chunk);
     });
     req.on('end', () => {
+      if (settled) return;
+      settled = true;
       const text = Buffer.concat(chunks).toString('utf8');
       if (!text) return resolveBody({});
       try {
@@ -68,7 +83,11 @@ async function readJsonBody(req: IncomingMessage): Promise<unknown> {
         reject(e);
       }
     });
-    req.on('error', reject);
+    req.on('error', (e) => {
+      if (settled) return;
+      settled = true;
+      reject(e);
+    });
   });
 }
 
@@ -174,6 +193,17 @@ const server = createServer(async (req, res) => {
 
     sendJson(res, 404, { error: 'Not found', path, method });
   } catch (e) {
+    if (res.headersSent) {
+      res.end();
+      return;
+    }
+    if (e instanceof PayloadTooLargeError) {
+      // Drain any bytes still in flight so the 413 flushes over a graceful
+      // close instead of a connection reset (which a proxy reports as 502).
+      req.resume();
+      sendJson(res, 413, { error: 'Request body too large' });
+      return;
+    }
     const msg = e instanceof Error ? e.message : String(e);
     sendJson(res, 500, { error: msg });
   }
