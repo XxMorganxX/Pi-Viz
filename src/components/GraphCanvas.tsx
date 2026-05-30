@@ -23,12 +23,20 @@ import { graphInteractionProps } from '../lib/graph-interactions';
 import type { GraphModel, NodeData } from '../lib/types';
 import {
   graphNodesToFlowNodes,
-  mergeFlowNodePositions,
   moveContainedNodesWithDraggedFrames,
   preventResponseFrameOverlapDuringDrag,
+  refreshFlowNodePositions,
   syncResponseFrameBounds,
 } from '../lib/flow-nodes';
 import { graphEdgesToFlowEdges } from '../lib/flow-edges';
+import { layoutTopologyKey } from '../lib/layout-cache';
+import {
+  applySavedNodeLayout,
+  captureNodeLayout,
+  layoutStorageKey,
+  readSavedNodeLayout,
+  writeSavedNodeLayout,
+} from '../lib/layout-storage';
 
 const nodeTypes: NodeTypes = {
   mission: MissionNode,
@@ -43,6 +51,7 @@ interface Props {
   graph: GraphModel;
   enteredIds?: Set<string>;
   selectedId: string | null;
+  autoFormatVersion?: number;
   focusedNodeId?: string | null;
   onFocusedNodeSettled?: () => void;
   onSelect: (id: string | null, data: NodeData | null) => void;
@@ -52,6 +61,7 @@ function GraphCanvasInner({
   graph,
   enteredIds,
   selectedId,
+  autoFormatVersion = 0,
   focusedNodeId,
   onFocusedNodeSettled,
   onSelect,
@@ -61,6 +71,7 @@ function GraphCanvasInner({
   const { fitView } = useReactFlow<Node, Edge>();
   const graphNodesRef = useRef(graph.nodes);
   graphNodesRef.current = graph.nodes;
+  const autoFormatVersionRef = useRef(autoFormatVersion);
   const enteredIdsRef = useRef<Set<string>>(enteredIds ?? new Set());
   enteredIdsRef.current = enteredIds ?? new Set();
 
@@ -73,9 +84,30 @@ function GraphCanvasInner({
     return graphEdgesToFlowEdges(graph.edges, graph.nodes);
   }, [graph.edges, graph.nodes]);
 
+  const storageKey = useMemo(() => layoutStorageKey(layoutTopologyKey(graph)), [graph]);
+
+  const saveNodeLayout = useCallback(
+    (nextNodes: Node[]) => {
+      if (nextNodes.length === 0) return;
+      writeSavedNodeLayout(browserLayoutStorage(), storageKey, captureNodeLayout(nextNodes));
+    },
+    [storageKey]
+  );
+
   useEffect(() => {
-    setNodes((current) => syncResponseFrameBounds(mergeFlowNodePositions(flowNodes, current), graph.nodes));
-  }, [flowNodes, graph.nodes, setNodes]);
+    const preservePositions = autoFormatVersionRef.current === autoFormatVersion;
+    autoFormatVersionRef.current = autoFormatVersion;
+    setNodes((current) => {
+      const savedLayout = preservePositions ? readSavedNodeLayout(browserLayoutStorage(), storageKey) : null;
+      const currentOrSaved = current.length === 0 ? applySavedNodeLayout(flowNodes, savedLayout) : current;
+      const next = refreshFlowNodePositions(flowNodes, currentOrSaved, graph.nodes, {
+        preservePositions,
+        autoFormatOnNewNodes: true,
+      });
+      saveNodeLayout(next);
+      return next;
+    });
+  }, [autoFormatVersion, flowNodes, graph.nodes, saveNodeLayout, setNodes, storageKey]);
 
   const handleNodesChange = useCallback(
     (changes: NodeChange<Node>[]) => {
@@ -83,10 +115,12 @@ function GraphCanvasInner({
         const changed = applyNodeChanges(changes, current);
         const moved = moveContainedNodesWithDraggedFrames(changed, current, graphNodesRef.current);
         const clamped = preventResponseFrameOverlapDuringDrag(moved, current, graphNodesRef.current);
-        return syncResponseFrameBounds(clamped, graphNodesRef.current);
+        const synced = syncResponseFrameBounds(clamped, graphNodesRef.current);
+        saveNodeLayout(synced);
+        return synced;
       });
     },
-    [setNodes]
+    [saveNodeLayout, setNodes]
   );
 
   useEffect(() => {
@@ -129,4 +163,9 @@ export default function GraphCanvas(props: Props) {
       <GraphCanvasInner {...props} />
     </ReactFlowProvider>
   );
+}
+
+function browserLayoutStorage(): Storage | undefined {
+  if (typeof window === 'undefined') return undefined;
+  return window.localStorage;
 }

@@ -1,0 +1,20 @@
+services:
+  agent-viz:
+    build:
+      context: .
+    image: agent-viz:local
+    ports:
+      - "${AGENT_VIZ_PORT:-8080}:8080"
+    environment:
+      TRACE_API_TOKEN: "${TRACE_API_TOKEN:-test-token}"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:8080/api/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 5

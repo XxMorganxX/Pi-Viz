@@ -17,6 +17,7 @@ interface Props {
   onConnectLive: () => void;
   onDisconnectLive: () => void;
   onReload: () => void;
+  onFormat: () => void;
 }
 
 export default function Toolbar({
@@ -33,6 +34,7 @@ export default function Toolbar({
   onConnectLive,
   onDisconnectLive,
   onReload,
+  onFormat,
 }: Props) {
   const orderedThreads = useMemo(() => {
     if (!snapshot) return [];
@@ -90,6 +92,7 @@ export default function Toolbar({
       )}
 
       <button onClick={onReload} disabled={!snapshot && !liveMode}>Reload</button>
+      <button onClick={onFormat} disabled={!snapshot}>Format</button>
 
       <span className="spacer" />
 

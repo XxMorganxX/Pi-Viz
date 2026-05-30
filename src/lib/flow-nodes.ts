@@ -82,6 +82,19 @@ export function mergeFlowNodePositions(nextNodes: Node[], currentNodes: Node[]):
   });
 }
 
+export function refreshFlowNodePositions(
+  nextNodes: Node[],
+  currentNodes: Node[],
+  graphNodes: GraphNode[],
+  options: { preservePositions: boolean; autoFormatOnNewNodes?: boolean }
+): Node[] {
+  const currentIds = new Set(currentNodes.map((node) => node.id));
+  const hasNewNodes = nextNodes.some((node) => !currentIds.has(node.id));
+  const shouldPreservePositions = options.preservePositions && !(options.autoFormatOnNewNodes && hasNewNodes);
+  const positioned = shouldPreservePositions ? mergeFlowNodePositions(nextNodes, currentNodes) : nextNodes;
+  return syncResponseFrameBounds(positioned, graphNodes, { alignFrameCenters: !shouldPreservePositions });
+}
+
 export function moveContainedNodesWithDraggedFrames(
   changedNodes: Node[],
   previousNodes: Node[],
@@ -151,31 +164,54 @@ export function preventResponseFrameOverlapDuringDrag(
 
   const previousRects = responseFrameRects(previousNodes, graphNodes);
   const changedRects = responseFrameRects(changedNodes, graphNodes);
-  const blockedFrameIds = new Set<string>();
+  const correctionsByFrameId = new Map<string, { x: number; y: number }>();
 
   for (const frameId of movedFrameIds) {
     const movedRect = changedRects.get(frameId);
-    if (!movedRect) continue;
+    const previousRect = previousRects.get(frameId);
+    if (!movedRect || !previousRect) continue;
+
+    let correction = { x: 0, y: 0 };
 
     for (const [otherFrameId, otherRect] of previousRects) {
       if (otherFrameId === frameId) continue;
-      if (!rectsOverlapWithGap(movedRect, otherRect, RESPONSE_FRAME_STACK_GAP_Y)) continue;
-      blockedFrameIds.add(frameId);
-      break;
+      const correctedRect = translateRect(movedRect, correction);
+      if (!rectsOverlapWithGap(correctedRect, otherRect, RESPONSE_FRAME_STACK_GAP_Y)) continue;
+
+      const nextCorrection = collisionCorrection(previousRect, correctedRect, otherRect, RESPONSE_FRAME_STACK_GAP_Y);
+      correction = {
+        x: correction.x + nextCorrection.x,
+        y: correction.y + nextCorrection.y,
+      };
     }
+
+    if (correction.x !== 0 || correction.y !== 0) correctionsByFrameId.set(frameId, correction);
   }
 
-  if (blockedFrameIds.size === 0) return changedNodes;
+  if (correctionsByFrameId.size === 0) return changedNodes;
 
   return changedNodes.map((node) => {
     const graphNode = graphNodeById.get(node.id);
     const frameId = graphNode?.category === 'responseFrame' ? graphNode.id : graphNode?.containerId;
-    if (!frameId || !blockedFrameIds.has(frameId)) return node;
-    return previousNodeById.get(node.id) ?? node;
+    const correction = frameId ? correctionsByFrameId.get(frameId) : undefined;
+    const previousNode = previousNodeById.get(node.id);
+    if (!correction || !previousNode || samePosition(node.position, previousNode.position)) return node;
+
+    return {
+      ...node,
+      position: {
+        x: node.position.x + correction.x,
+        y: node.position.y + correction.y,
+      },
+    };
   });
 }
 
-export function syncResponseFrameBounds(flowNodes: Node[], graphNodes: GraphNode[]): Node[] {
+export function syncResponseFrameBounds(
+  flowNodes: Node[],
+  graphNodes: GraphNode[],
+  options: { alignFrameCenters?: boolean } = {}
+): Node[] {
   const flowNodeById = new Map(flowNodes.map((node) => [node.id, node]));
   const graphNodeById = new Map(graphNodes.map((node) => [node.id, node]));
   const containedIdsByFrameId = new Map<string, string[]>();
@@ -213,10 +249,11 @@ export function syncResponseFrameBounds(flowNodes: Node[], graphNodes: GraphNode
 
     const width = Math.max(RESPONSE_FRAME_MIN_W, maxX - minX + RESPONSE_FRAME_PAD_X * 2);
     const height = Math.max(RESPONSE_FRAME_MIN_H, maxY - minY + RESPONSE_FRAME_PAD_TOP + RESPONSE_FRAME_PAD_BOTTOM);
+    const centerX = (minX + maxX) / 2;
     return {
       ...node,
       position: {
-        x: minX - RESPONSE_FRAME_PAD_X,
+        x: centerX - width / 2,
         y: minY - RESPONSE_FRAME_PAD_TOP,
       },
       width,
@@ -229,10 +266,14 @@ export function syncResponseFrameBounds(flowNodes: Node[], graphNodes: GraphNode
     };
   });
 
-  return stackSyncedResponseFrames(syncedNodes, graphNodes);
+  return stackSyncedResponseFrames(syncedNodes, graphNodes, options);
 }
 
-function stackSyncedResponseFrames(flowNodes: Node[], graphNodes: GraphNode[]): Node[] {
+function stackSyncedResponseFrames(
+  flowNodes: Node[],
+  graphNodes: GraphNode[],
+  options: { alignFrameCenters?: boolean } = {}
+): Node[] {
   const graphNodeById = new Map(graphNodes.map((node) => [node.id, node]));
   const flowNodeById = new Map(flowNodes.map((node) => [node.id, node]));
   const frames = graphNodes
@@ -242,15 +283,20 @@ function stackSyncedResponseFrames(flowNodes: Node[], graphNodes: GraphNode[]): 
     .sort((a, b) => a.position.y - b.position.y || a.position.x - b.position.x || a.id.localeCompare(b.id));
   if (frames.length < 2) return flowNodes;
 
-  const shiftsByFrameId = new Map<string, number>();
+  const shiftsByFrameId = new Map<string, { x: number; y: number }>();
+  const targetCenterX = options.alignFrameCenters
+    ? frames[0].position.x + numericDimension(frames[0].width, graphNodeById.get(frames[0].id)?.width) / 2
+    : undefined;
   let previousBottom = Number.NEGATIVE_INFINITY;
 
   for (const frame of frames) {
+    const frameWidth = numericDimension(frame.width, graphNodeById.get(frame.id)?.width);
     const frameHeight = numericDimension(frame.height, graphNodeById.get(frame.id)?.height);
     const minY = previousBottom + RESPONSE_FRAME_STACK_GAP_Y;
     const shiftY = frame.position.y < minY ? minY - frame.position.y : 0;
     const shiftedY = frame.position.y + shiftY;
-    if (shiftY > 0) shiftsByFrameId.set(frame.id, shiftY);
+    const shiftX = targetCenterX === undefined ? 0 : targetCenterX - (frame.position.x + frameWidth / 2);
+    if (shiftX !== 0 || shiftY > 0) shiftsByFrameId.set(frame.id, { x: shiftX, y: shiftY });
     previousBottom = shiftedY + frameHeight;
   }
 
@@ -258,14 +304,14 @@ function stackSyncedResponseFrames(flowNodes: Node[], graphNodes: GraphNode[]): 
 
   return flowNodes.map((node) => {
     const graphNode = graphNodeById.get(node.id);
-    const shiftY = shiftsByFrameId.get(node.id) ?? (graphNode?.containerId ? shiftsByFrameId.get(graphNode.containerId) : 0);
-    if (!shiftY) return node;
+    const shift = shiftsByFrameId.get(node.id) ?? (graphNode?.containerId ? shiftsByFrameId.get(graphNode.containerId) : undefined);
+    if (!shift) return node;
 
     return {
       ...node,
       position: {
-        x: node.position.x,
-        y: node.position.y + shiftY,
+        x: node.position.x + shift.x,
+        y: node.position.y + shift.y,
       },
     };
   });
@@ -325,10 +371,11 @@ function responseFrameRects(flowNodes: Node[], graphNodes: GraphNode[]): Map<str
       })
     );
 
+    const width = Math.max(RESPONSE_FRAME_MIN_W, maxX - minX + RESPONSE_FRAME_PAD_X * 2);
     rects.set(graphNode.id, {
-      x: minX - RESPONSE_FRAME_PAD_X,
+      x: (minX + maxX) / 2 - width / 2,
       y: minY - RESPONSE_FRAME_PAD_TOP,
-      width: Math.max(RESPONSE_FRAME_MIN_W, maxX - minX + RESPONSE_FRAME_PAD_X * 2),
+      width,
       height: Math.max(RESPONSE_FRAME_MIN_H, maxY - minY + RESPONSE_FRAME_PAD_TOP + RESPONSE_FRAME_PAD_BOTTOM),
     });
   }
@@ -340,6 +387,39 @@ function rectsOverlapWithGap(a: Rect, b: Rect, gapY: number): boolean {
   const xOverlaps = a.x < b.x + b.width && b.x < a.x + a.width;
   const yOverlaps = a.y < b.y + b.height + gapY && b.y < a.y + a.height + gapY;
   return xOverlaps && yOverlaps;
+}
+
+function translateRect(rect: Rect, delta: { x: number; y: number }): Rect {
+  return {
+    ...rect,
+    x: rect.x + delta.x,
+    y: rect.y + delta.y,
+  };
+}
+
+function collisionCorrection(previous: Rect, current: Rect, other: Rect, gapY: number): { x: number; y: number } {
+  const movedDown = current.y > previous.y;
+  const movedUp = current.y < previous.y;
+  const movedRight = current.x > previous.x;
+  const movedLeft = current.x < previous.x;
+
+  if (movedDown && previous.y + previous.height + gapY <= other.y) {
+    return { x: 0, y: other.y - gapY - current.height - current.y };
+  }
+  if (movedUp && other.y + other.height + gapY <= previous.y) {
+    return { x: 0, y: other.y + other.height + gapY - current.y };
+  }
+  if (movedRight && previous.x + previous.width <= other.x) {
+    return { x: other.x - current.width - current.x, y: 0 };
+  }
+  if (movedLeft && other.x + other.width <= previous.x) {
+    return { x: other.x + other.width - current.x, y: 0 };
+  }
+
+  return {
+    x: previous.x - current.x,
+    y: previous.y - current.y,
+  };
 }
 
 function samePosition(a: { x: number; y: number }, b: { x: number; y: number }): boolean {

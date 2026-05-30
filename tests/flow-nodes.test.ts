@@ -6,6 +6,7 @@ import {
   moveContainedNodesWithDraggedFrames,
   mergeFlowNodePositions,
   preventResponseFrameOverlapDuringDrag,
+  refreshFlowNodePositions,
   syncResponseFrameBounds,
 } from '../src/lib/flow-nodes.js';
 import type { GraphNode } from '../src/lib/types.js';
@@ -265,6 +266,35 @@ test('response frame bounds keep the default frame size after live sync', () => 
   assert.equal(syncedFrame.height, 1120);
 });
 
+test('response frame bounds center the default frame around the contained prompt flow', () => {
+  const responseFrame: GraphNode = {
+    ...threadNode,
+    id: 'response:alpha:1',
+    type: 'responseFrame',
+    category: 'responseFrame',
+    position: { x: 0, y: 0 },
+    width: 1180,
+    height: 1120,
+  } as GraphNode;
+  const runtimeNode: GraphNode = {
+    ...threadNode,
+    id: 'orchestrator:alpha',
+    type: 'orchestrator',
+    category: 'agentExecution',
+    containerId: responseFrame.id,
+    position: { x: 320, y: 240 },
+    width: 200,
+    height: 120,
+  } as GraphNode;
+
+  const [syncedFrame] = syncResponseFrameBounds(
+    graphNodesToFlowNodes([responseFrame, runtimeNode], null, new Set()),
+    [responseFrame, runtimeNode]
+  );
+
+  assert.equal(syncedFrame.position.x + Number(syncedFrame.width) / 2, 420);
+});
+
 test('response frame bounds avoid overlap after live drag sync', () => {
   const firstFrame: GraphNode = {
     ...threadNode,
@@ -397,6 +427,94 @@ test('dragging a node toward another response frame stops before pushing the oth
   assert.deepEqual(clampedNodes.find((node) => node.id === secondFrame.id)?.position, { x: 0, y: 1300 });
 });
 
+test('dragging a node into another response frame preserves tangential sliding', () => {
+  const firstFrame: GraphNode = {
+    ...threadNode,
+    id: 'response:alpha:1',
+    type: 'responseFrame',
+    category: 'responseFrame',
+    position: { x: 0, y: 0 },
+    width: 1180,
+    height: 1120,
+  } as GraphNode;
+  const firstRuntime: GraphNode = {
+    ...threadNode,
+    id: 'orchestrator:alpha:1',
+    type: 'orchestrator',
+    category: 'agentExecution',
+    containerId: firstFrame.id,
+    position: { x: 200, y: 200 },
+    width: 200,
+    height: 120,
+  } as GraphNode;
+  const secondFrame: GraphNode = {
+    ...firstFrame,
+    id: 'response:alpha:2',
+    position: { x: 0, y: 1300 },
+  } as GraphNode;
+  const secondRuntime: GraphNode = {
+    ...firstRuntime,
+    id: 'orchestrator:alpha:2',
+    containerId: secondFrame.id,
+    position: { x: 200, y: 1500 },
+  } as GraphNode;
+  const graphNodes = [firstFrame, firstRuntime, secondFrame, secondRuntime];
+  const currentFlowNodes = graphNodesToFlowNodes(graphNodes, null, new Set());
+  const changedFlowNodes = currentFlowNodes.map((node) =>
+    node.id === firstRuntime.id ? { ...node, position: { x: 260, y: 1200 } } : node
+  );
+
+  const clampedNodes = preventResponseFrameOverlapDuringDrag(changedFlowNodes, currentFlowNodes, graphNodes);
+
+  assert.deepEqual(clampedNodes.find((node) => node.id === firstRuntime.id)?.position, { x: 260, y: 200 });
+  assert.deepEqual(clampedNodes.find((node) => node.id === secondRuntime.id)?.position, { x: 200, y: 1500 });
+});
+
+test('dragging a response frame into another response frame preserves tangential sliding', () => {
+  const firstFrame: GraphNode = {
+    ...threadNode,
+    id: 'response:alpha:1',
+    type: 'responseFrame',
+    category: 'responseFrame',
+    position: { x: 0, y: 0 },
+    width: 1180,
+    height: 1120,
+  } as GraphNode;
+  const firstRuntime: GraphNode = {
+    ...threadNode,
+    id: 'orchestrator:alpha:1',
+    type: 'orchestrator',
+    category: 'agentExecution',
+    containerId: firstFrame.id,
+    position: { x: 200, y: 200 },
+    width: 200,
+    height: 120,
+  } as GraphNode;
+  const secondFrame: GraphNode = {
+    ...firstFrame,
+    id: 'response:alpha:2',
+    position: { x: 0, y: 1300 },
+  } as GraphNode;
+  const secondRuntime: GraphNode = {
+    ...firstRuntime,
+    id: 'orchestrator:alpha:2',
+    containerId: secondFrame.id,
+    position: { x: 200, y: 1500 },
+  } as GraphNode;
+  const graphNodes = [firstFrame, firstRuntime, secondFrame, secondRuntime];
+  const currentFlowNodes = graphNodesToFlowNodes(graphNodes, null, new Set());
+  const draggedFrameNodes = currentFlowNodes.map((node) =>
+    node.id === firstFrame.id ? { ...node, position: { x: 60, y: 1000 } } : node
+  );
+  const changedFlowNodes = moveContainedNodesWithDraggedFrames(draggedFrameNodes, currentFlowNodes, graphNodes);
+
+  const clampedNodes = preventResponseFrameOverlapDuringDrag(changedFlowNodes, currentFlowNodes, graphNodes);
+
+  assert.deepEqual(clampedNodes.find((node) => node.id === firstFrame.id)?.position, { x: 60, y: 0 });
+  assert.deepEqual(clampedNodes.find((node) => node.id === firstRuntime.id)?.position, { x: 260, y: 200 });
+  assert.deepEqual(clampedNodes.find((node) => node.id === secondRuntime.id)?.position, { x: 200, y: 1500 });
+});
+
 test('user moved node positions are preserved when graph nodes refresh', () => {
   const refreshed = graphNodesToFlowNodes([missionNode], null, new Set());
   const existing = [
@@ -409,4 +527,96 @@ test('user moved node positions are preserved when graph nodes refresh', () => {
   const [merged] = mergeFlowNodePositions(refreshed, existing);
 
   assert.deepEqual(merged.position, { x: 84, y: 42 });
+});
+
+test('auto-format refresh uses graph layout positions instead of preserving moved nodes', () => {
+  const refreshed = graphNodesToFlowNodes([missionNode], null, new Set());
+  const existing = [
+    {
+      ...refreshed[0],
+      position: { x: 84, y: 42 },
+    },
+  ];
+
+  const [merged] = refreshFlowNodePositions(refreshed, existing, [missionNode], { preservePositions: false });
+
+  assert.deepEqual(merged.position, missionNode.position);
+});
+
+test('refresh auto-formats when new nodes are posted to the UI', () => {
+  const threadNode: GraphNode = {
+    ...missionNode,
+    id: 'thread:alpha',
+    type: 'thread',
+    category: 'sessionRoot',
+    parentId: missionNode.id,
+    position: { x: 300, y: 220 },
+  };
+  const refreshed = graphNodesToFlowNodes([missionNode, threadNode], null, new Set());
+  const existing = [
+    {
+      ...refreshed[0],
+      position: { x: 84, y: 42 },
+    },
+  ];
+
+  const merged = refreshFlowNodePositions(refreshed, existing, [missionNode, threadNode], {
+    preservePositions: true,
+    autoFormatOnNewNodes: true,
+  });
+
+  assert.deepEqual(merged.find((node) => node.id === missionNode.id)?.position, missionNode.position);
+  assert.deepEqual(merged.find((node) => node.id === threadNode.id)?.position, {
+    x: missionNode.position.x + threadNode.position.x,
+    y: missionNode.position.y + threadNode.position.y,
+  });
+});
+
+test('refresh auto-format stacks response frame centers on one vertical centerline', () => {
+  const firstFrame: GraphNode = {
+    ...threadNode,
+    id: 'response:alpha:1',
+    type: 'responseFrame',
+    category: 'responseFrame',
+    position: { x: 0, y: 0 },
+    width: 1180,
+    height: 1120,
+  } as GraphNode;
+  const firstRuntime: GraphNode = {
+    ...threadNode,
+    id: 'orchestrator:alpha:1',
+    type: 'orchestrator',
+    category: 'agentExecution',
+    containerId: firstFrame.id,
+    position: { x: 320, y: 240 },
+    width: 200,
+    height: 120,
+  } as GraphNode;
+  const secondFrame: GraphNode = {
+    ...firstFrame,
+    id: 'response:alpha:2',
+    position: { x: 600, y: 400 },
+  } as GraphNode;
+  const secondRuntime: GraphNode = {
+    ...firstRuntime,
+    id: 'orchestrator:alpha:2',
+    containerId: secondFrame.id,
+    position: { x: 900, y: 640 },
+  } as GraphNode;
+  const refreshed = graphNodesToFlowNodes(
+    [firstFrame, firstRuntime, secondFrame, secondRuntime],
+    null,
+    new Set()
+  );
+
+  const merged = refreshFlowNodePositions(refreshed, [], [firstFrame, firstRuntime, secondFrame, secondRuntime], {
+    preservePositions: false,
+  });
+  const syncedFirstFrame = merged.find((node) => node.id === firstFrame.id)!;
+  const syncedSecondFrame = merged.find((node) => node.id === secondFrame.id)!;
+  const syncedSecondRuntime = merged.find((node) => node.id === secondRuntime.id)!;
+  const firstCenterX = syncedFirstFrame.position.x + Number(syncedFirstFrame.width) / 2;
+
+  assert.equal(syncedSecondFrame.position.x + Number(syncedSecondFrame.width) / 2, firstCenterX);
+  assert.equal(syncedSecondRuntime.position.x + Number(secondRuntime.width) / 2, firstCenterX);
 });

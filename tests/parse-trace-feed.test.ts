@@ -578,6 +578,16 @@ test('buildGraph shows repeated live Pi prompt sessions as sequenced response fr
     }),
     ['Investigate the frontend bounding boxes', 'Patch the response frame hitbox']
   );
+  assert.deepEqual(
+    frames.map((node) => {
+      assert.equal(node.data.kind, 'responseFrame');
+      return [node.data.turn.startedAt, node.data.turn.endedAt, node.data.turn.durationMs];
+    }),
+    [
+      ['2026-05-25T00:00:00.000Z', '2026-05-25T00:00:02.000Z', 2000],
+      ['2026-05-25T00:00:03.000Z', '2026-05-25T00:00:05.000Z', 2000],
+    ]
+  );
   assert.equal(firstFeed?.data.kind, 'traceFeed');
   assert.equal(secondFeed?.data.kind, 'traceFeed');
   if (firstFeed?.data.kind !== 'traceFeed' || secondFeed?.data.kind !== 'traceFeed') {

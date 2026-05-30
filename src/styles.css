@@ -374,6 +374,24 @@ button.primary {
   padding: 10px 13px;
   font-size: 30px;
 }
+.response-frame-runtime {
+  position: absolute;
+  top: 112px;
+  right: 22px;
+  z-index: 1;
+  padding: 10px 13px;
+  border: 1px solid rgba(22, 214, 165, 0.38);
+  border-radius: 7px;
+  background:
+    linear-gradient(180deg, rgba(18, 34, 36, 0.92), rgba(8, 15, 16, 0.82)),
+    rgba(8, 15, 16, 0.82);
+  color: #8ff0d3;
+  font-size: 18px;
+  font-weight: 760;
+  line-height: 1;
+  pointer-events: none;
+  white-space: nowrap;
+}
 .response-frame-preview {
   flex: 1 1 auto;
   min-width: 0;

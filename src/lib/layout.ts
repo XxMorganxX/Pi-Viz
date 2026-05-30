@@ -16,7 +16,7 @@ const RESPONSE_FRAME_PAD_TOP = 190;
 const RESPONSE_FRAME_PAD_BOTTOM = 150;
 const RESPONSE_FRAME_STACK_GAP_Y = 180;
 const AGENT_LEVEL_GAP_Y = 170;
-const AGENT_SIBLING_GAP_X = 150;
+const CHILD_ROW_WIDTH_MULTIPLIER = 1.6;
 const TRACE_FEED_ROW_GAP_Y = 120;
 const TRACE_FEED_SIDE_GAP_X = 230;
 const TRACE_FEED_COLUMN_GAP_X = 160;
@@ -104,49 +104,10 @@ function formatResponseFrameContents(nodes: GraphNode[]): GraphNode[] {
     const traceFeeds = children.filter((node) => node.category === 'traceDisplay');
     if (agents.length === 0) continue;
 
-    const agentIds = new Set(agents.map((node) => node.id));
-    const levelsById = agentLevels(agents, agentIds);
-    const levels = [...new Set(levelsById.values())].sort((a, b) => a - b);
     const frameCenterX = frame.position.x + (frame.width ?? RESPONSE_FRAME_W) / 2;
     const topY = frame.position.y + RESPONSE_FRAME_PAD_TOP;
-    let deepestAgentBottom = topY;
-
-    for (const level of levels) {
-      const levelAgents = agents
-        .filter((node) => levelsById.get(node.id) === level)
-        .sort(compareAgents);
-      const totalWidth =
-        levelAgents.reduce((sum, node) => sum + (node.width ?? AGENT_EXECUTION_W), 0) +
-        Math.max(0, levelAgents.length - 1) * AGENT_SIBLING_GAP_X;
-      let x = frameCenterX - totalWidth / 2;
-      const y = topY + level * (AGENT_EXECUTION_H + AGENT_LEVEL_GAP_Y);
-
-      for (const agent of levelAgents) {
-        updatesById.set(agent.id, { x, y });
-        deepestAgentBottom = Math.max(deepestAgentBottom, y + (agent.height ?? AGENT_EXECUTION_H));
-        x += (agent.width ?? AGENT_EXECUTION_W) + AGENT_SIBLING_GAP_X;
-      }
-    }
-
-    const sideCounts = new Map<number, number>();
-    const feedRowY = deepestAgentBottom + TRACE_FEED_ROW_GAP_Y;
-    for (const feed of traceFeeds.sort(compareTraceFeeds)) {
-      const parent = feed.parentId ? nodeById.get(feed.parentId) : undefined;
-      const parentPosition = parent ? updatesById.get(parent.id) ?? parent.position : undefined;
-      const side = parent?.type === 'orchestrator' ? 1 : -1;
-      const lane = sideCounts.get(side) ?? 0;
-      sideCounts.set(side, lane + 1);
-
-      const parentX = parentPosition?.x ?? frameCenterX - AGENT_EXECUTION_W / 2;
-      const feedWidth = feed.width ?? TRACE_FEED_W;
-      const parentWidth = parent?.width ?? AGENT_EXECUTION_W;
-      const x =
-        side === 1
-          ? parentX + parentWidth + TRACE_FEED_SIDE_GAP_X + lane * (feedWidth + TRACE_FEED_COLUMN_GAP_X)
-          : parentX - feedWidth - TRACE_FEED_SIDE_GAP_X - lane * (feedWidth + TRACE_FEED_COLUMN_GAP_X);
-
-      updatesById.set(feed.id, { x, y: feedRowY });
-    }
+    layoutAgentSubtrees(agents, frameCenterX, topY, updatesById);
+    layoutTraceFeeds(traceFeeds, agents, frameCenterX, nodeById, updatesById);
   }
 
   if (updatesById.size === 0) return nodes;
@@ -156,28 +117,138 @@ function formatResponseFrameContents(nodes: GraphNode[]): GraphNode[] {
   });
 }
 
-function agentLevels(agents: GraphNode[], agentIds: Set<string>): Map<string, number> {
-  const levelsById = new Map<string, number>();
+function layoutAgentSubtrees(
+  agents: GraphNode[],
+  frameCenterX: number,
+  topY: number,
+  updatesById: Map<string, { x: number; y: number }>
+): number {
+  const agentIds = new Set(agents.map((node) => node.id));
   const agentById = new Map(agents.map((node) => [node.id, node]));
-
-  const levelFor = (agent: GraphNode, visiting: Set<string>): number => {
-    const cached = levelsById.get(agent.id);
-    if (cached !== undefined) return cached;
-    if (visiting.has(agent.id)) return 0;
-
-    visiting.add(agent.id);
-    const parent = agent.parentId && agentIds.has(agent.parentId) ? agentById.get(agent.parentId) : undefined;
-    const level = parent ? levelFor(parent, visiting) + 1 : 0;
-    visiting.delete(agent.id);
-    levelsById.set(agent.id, level);
-    return level;
-  };
+  const childrenByParentId = new Map<string, GraphNode[]>();
+  const levelsById = new Map<string, number>();
 
   for (const agent of agents) {
-    levelFor(agent, new Set());
+    if (!agent.parentId || !agentIds.has(agent.parentId)) continue;
+    const siblings = childrenByParentId.get(agent.parentId) ?? [];
+    siblings.push(agent);
+    childrenByParentId.set(agent.parentId, siblings);
   }
 
-  return levelsById;
+  for (const siblings of childrenByParentId.values()) {
+    siblings.sort(compareAgents);
+  }
+
+  const roots = agents.filter((agent) => !agent.parentId || !agentIds.has(agent.parentId)).sort(compareAgents);
+  const rootAgents = roots.length > 0 ? roots : [...agents].sort(compareAgents);
+  let deepestAgentBottom = topY;
+
+  const placeAgent = (agent: GraphNode, centerX: number, level: number): void => {
+    const width = agent.width ?? AGENT_EXECUTION_W;
+    const y = topY + level * (AGENT_EXECUTION_H + AGENT_LEVEL_GAP_Y);
+    updatesById.set(agent.id, { x: centerX - width / 2, y });
+    levelsById.set(agent.id, level);
+    deepestAgentBottom = Math.max(deepestAgentBottom, y + (agent.height ?? AGENT_EXECUTION_H));
+  };
+
+  const placeChildRow = (children: GraphNode[], parentCenterX: number, level: number): void => {
+    if (children.length === 0) return;
+    const row = children.sort(compareAgents);
+    const widthSum = row.reduce((sum, child) => sum + (child.width ?? AGENT_EXECUTION_W), 0);
+    const rowWidth = widthSum * CHILD_ROW_WIDTH_MULTIPLIER;
+    const gap = row.length > 1 ? (rowWidth - widthSum) / (row.length - 1) : 0;
+    let x = parentCenterX - rowWidth / 2;
+
+    for (const child of row) {
+      const width = child.width ?? AGENT_EXECUTION_W;
+      placeAgent(child, x + width / 2, level);
+      x += width + gap;
+    }
+  };
+
+  placeChildRow(rootAgents, frameCenterX, 0);
+
+  for (let level = 0; level < agents.length; level += 1) {
+    const parentsAtLevel = agents
+      .filter((agent) => levelsById.get(agent.id) === level)
+      .sort((a, b) => (updatesById.get(a.id)?.x ?? a.position.x) - (updatesById.get(b.id)?.x ?? b.position.x));
+
+    if (parentsAtLevel.length === 0) continue;
+
+    for (const parent of parentsAtLevel) {
+      const parentPosition = updatesById.get(parent.id);
+      if (!parentPosition) continue;
+      placeChildRow(
+        childrenByParentId.get(parent.id) ?? [],
+        parentPosition.x + (parent.width ?? AGENT_EXECUTION_W) / 2,
+        level + 1
+      );
+    }
+  }
+
+  for (const agent of agentById.values()) {
+    if (updatesById.has(agent.id)) continue;
+    const width = agent.width ?? AGENT_EXECUTION_W;
+    const y = topY + (updatesById.size + 1) * (AGENT_EXECUTION_H + AGENT_LEVEL_GAP_Y);
+    updatesById.set(agent.id, { x: frameCenterX - width / 2, y });
+    deepestAgentBottom = Math.max(deepestAgentBottom, y + (agent.height ?? AGENT_EXECUTION_H));
+  }
+
+  return deepestAgentBottom;
+}
+
+function layoutTraceFeeds(
+  traceFeeds: GraphNode[],
+  agents: GraphNode[],
+  frameCenterX: number,
+  nodeById: Map<string, GraphNode>,
+  updatesById: Map<string, { x: number; y: number }>
+): void {
+  if (traceFeeds.length === 0) return;
+
+  const agentBounds = agents.reduce(
+    (bounds, agent) => {
+      const position = updatesById.get(agent.id) ?? agent.position;
+      return {
+        minX: Math.min(bounds.minX, position.x),
+        maxX: Math.max(bounds.maxX, position.x + (agent.width ?? AGENT_EXECUTION_W)),
+      };
+    },
+    { minX: Number.POSITIVE_INFINITY, maxX: Number.NEGATIVE_INFINITY }
+  );
+  const treeRight = Number.isFinite(agentBounds.maxX)
+    ? agentBounds.maxX
+    : frameCenterX + AGENT_EXECUTION_W / 2;
+  let orchestratorLane = 0;
+
+  for (const feed of traceFeeds.sort(compareTraceFeeds)) {
+    const parent = feed.parentId ? nodeById.get(feed.parentId) : undefined;
+    const parentPosition = parent ? updatesById.get(parent.id) ?? parent.position : undefined;
+    const feedWidth = feed.width ?? TRACE_FEED_W;
+    const parentWidth = parent?.width ?? AGENT_EXECUTION_W;
+    const parentHeight = parent?.height ?? AGENT_EXECUTION_H;
+
+    if (parent?.type === 'orchestrator') {
+      updatesById.set(feed.id, {
+        x: treeRight + TRACE_FEED_SIDE_GAP_X + orchestratorLane * (feedWidth + TRACE_FEED_COLUMN_GAP_X),
+        y: (parentPosition?.y ?? 0) + parentHeight + TRACE_FEED_ROW_GAP_Y,
+      });
+      orchestratorLane += 1;
+      continue;
+    }
+
+    const parentCenterX = parentPosition
+      ? parentPosition.x + parentWidth / 2
+      : frameCenterX;
+    const parentBottomY = parentPosition
+      ? parentPosition.y + parentHeight
+      : 0;
+
+    updatesById.set(feed.id, {
+      x: parentCenterX - feedWidth / 2,
+      y: parentBottomY + TRACE_FEED_ROW_GAP_Y,
+    });
+  }
 }
 
 function compareAgents(a: GraphNode, b: GraphNode): number {
@@ -214,8 +285,9 @@ function expandResponseFrames(nodes: GraphNode[]): GraphNode[] {
       RESPONSE_FRAME_H,
       maxY - minY + RESPONSE_FRAME_PAD_TOP + RESPONSE_FRAME_PAD_BOTTOM
     );
+    const centerX = (minX + maxX) / 2;
     frameBounds.set(frameId, {
-      x: minX - RESPONSE_FRAME_PAD_X,
+      x: centerX - width / 2,
       y: minY - RESPONSE_FRAME_PAD_TOP,
       width,
       height,
@@ -241,28 +313,30 @@ function stackResponseFrames(nodes: GraphNode[]): GraphNode[] {
     .sort((a, b) => a.position.y - b.position.y || a.position.x - b.position.x || a.id.localeCompare(b.id));
   if (frames.length < 2) return nodes;
 
-  const shiftsByFrameId = new Map<string, number>();
+  const shiftsByFrameId = new Map<string, { x: number; y: number }>();
+  const targetCenterX = frames[0].position.x + (frames[0].width ?? RESPONSE_FRAME_W) / 2;
   let previousBottom = Number.NEGATIVE_INFINITY;
 
   for (const frame of frames) {
     const minY = previousBottom + RESPONSE_FRAME_STACK_GAP_Y;
     const shiftY = frame.position.y < minY ? minY - frame.position.y : 0;
     const shiftedY = frame.position.y + shiftY;
-    if (shiftY > 0) shiftsByFrameId.set(frame.id, shiftY);
+    const shiftX = targetCenterX - (frame.position.x + (frame.width ?? RESPONSE_FRAME_W) / 2);
+    if (shiftX !== 0 || shiftY > 0) shiftsByFrameId.set(frame.id, { x: shiftX, y: shiftY });
     previousBottom = shiftedY + (frame.height ?? RESPONSE_FRAME_H);
   }
 
   if (shiftsByFrameId.size === 0) return nodes;
 
   return nodes.map((node) => {
-    const shiftY = shiftsByFrameId.get(node.id) ?? (node.containerId ? shiftsByFrameId.get(node.containerId) : 0);
-    if (!shiftY) return node;
+    const shift = shiftsByFrameId.get(node.id) ?? (node.containerId ? shiftsByFrameId.get(node.containerId) : undefined);
+    if (!shift) return node;
 
     return {
       ...node,
       position: {
-        x: node.position.x,
-        y: node.position.y + shiftY,
+        x: node.position.x + shift.x,
+        y: node.position.y + shift.y,
       },
     };
   });

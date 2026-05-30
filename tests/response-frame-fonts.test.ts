@@ -38,6 +38,15 @@ test('response frame header has a refined surface', () => {
   assert.match(ruleFor('.response-frame-header'), /box-shadow:/);
 });
 
+test('response frame shows prompt-to-answer runtime in the top right corner', () => {
+  assert.match(responseFrameSource, /className="response-frame-runtime"/);
+  assert.match(responseFrameSource, /\{fmtDuration\(turn\.durationMs\)\}/);
+  assert.doesNotMatch(ruleFor('.response-frame-header'), /right:\s*188px;/);
+  assert.match(ruleFor('.response-frame-runtime'), /position:\s*absolute;/);
+  assert.match(ruleFor('.response-frame-runtime'), /top:\s*112px;/);
+  assert.match(ruleFor('.response-frame-runtime'), /right:\s*22px;/);
+});
+
 test('response frame previews expose click-to-expand controls', () => {
   assert.match(responseFrameSource, /useState/);
   assert.match(responseFrameSource, /aria-expanded=\{expandedPrompt\}/);

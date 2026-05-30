@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Lily flower with eyes">
+  <title>Lily flower with eyes</title>
+  <defs>
+    <linearGradient id="petal" x1="8" x2="24" y1="6" y2="24" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fff7fb" />
+      <stop offset="0.62" stop-color="#d7d4ff" />
+      <stop offset="1" stop-color="#9ee7ff" />
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="42%" r="70%">
+      <stop stop-color="#243149" />
+      <stop offset="1" stop-color="#0b0d12" />
+    </radialGradient>
+  </defs>
+  <rect width="32" height="32" rx="7" fill="url(#glow)" />
+  <path d="M16 18.8c-2.6-4.1-2-8.1 0-12.3 2 4.2 2.6 8.2 0 12.3Z" fill="url(#petal)" stroke="#f7fbff" stroke-width="0.75" />
+  <path d="M14.2 20.8C9.7 19.5 7.5 16.1 7.1 10.9c4.2 1.5 6.7 4.4 7.1 9.9Z" fill="url(#petal)" stroke="#f7fbff" stroke-width="0.75" />
+  <path d="M17.8 20.8c4.5-1.3 6.7-4.7 7.1-9.9-4.2 1.5-6.7 4.4-7.1 9.9Z" fill="url(#petal)" stroke="#f7fbff" stroke-width="0.75" />
+  <path d="M12.6 23.8c1.3-1.7 2.3-3.1 3.4-5.8 1.1 2.7 2.1 4.1 3.4 5.8" fill="none" stroke="#5eead4" stroke-width="1.25" stroke-linecap="round" />
+  <g fill="#0b0d12" stroke="#f7fbff" stroke-width="0.55">
+    <ellipse cx="16" cy="13.3" rx="3.35" ry="1.95" />
+    <ellipse cx="11.7" cy="16.1" rx="2.45" ry="1.45" transform="rotate(28 11.7 16.1)" />
+    <ellipse cx="20.3" cy="16.1" rx="2.45" ry="1.45" transform="rotate(-28 20.3 16.1)" />
+  </g>
+  <g fill="#7cc4ff">
+    <circle cx="16" cy="13.3" r="0.95" />
+    <circle cx="11.7" cy="16.1" r="0.72" />
+    <circle cx="20.3" cy="16.1" r="0.72" />
+  </g>
+  <g fill="#ffffff">
+    <circle cx="15.7" cy="12.95" r="0.25" />
+    <circle cx="11.5" cy="15.85" r="0.18" />
+    <circle cx="20.1" cy="15.85" r="0.18" />
+  </g>
+</svg>
