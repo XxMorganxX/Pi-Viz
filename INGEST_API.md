@@ -524,10 +524,12 @@ All errors return JSON `{ "error": "<message>" }` with appropriate status:
 - `400` — missing required fields (`agentId`, `role`, `agentType`, `model`,
   `tool`, `skill`)
 - `404` — unknown `sessionId`, `threadId`, or `agentId`
+- `413` — request body exceeds the `2 MB` limit
 - `500` — JSON parse failure or unexpected server error
 
 The body-size limit (`2 MB`) is enforced before parsing; oversize requests
-terminate the connection with a `500`.
+receive a `413 {"error":"Request body too large"}` over a graceful close
+(the connection is not reset, so a fronting proxy reports `413`, not `502`).
 
 ---
 

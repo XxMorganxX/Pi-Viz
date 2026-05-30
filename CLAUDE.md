@@ -48,7 +48,7 @@ The sidecar emits fine-grained events (`session.created`, `tool.called`, etc.) b
 
 - `/sessions/:id/threads/:tid/agents` is **idempotent on `agentId`** — re-POSTing patches in place. Harness retries are safe; the harness can register an agent with partial info first and add tools/prompt later.
 - Tool/skill `input`/`output`/`args` are **truncated to 800 chars server-side**. Don't rely on full payloads being available downstream; if needed, store elsewhere and link via `metadata`.
-- Body size is capped at 2 MB; oversize requests are terminated before parsing.
+- Body size is capped at 2 MB; oversize requests get a `413` over a graceful close (no socket reset, so a fronting proxy reports `413`, not `502`).
 
 `INGEST_API.md` is the authoritative spec for the ingest surface. When changing endpoints, request shapes, or event names, update it.
 

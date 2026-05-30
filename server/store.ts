@@ -746,6 +746,17 @@ function applyStateTransition(thread: Thread, event: TraceEvent): void {
   thread.milestones.set(key, milestone);
 }
 
+/**
+ * True when a `subagent` tool result carries at least one child the harness
+ * already streamed live (each such child run is tagged `tracedLive`). Used to
+ * suppress the failed-spawn fallback node when a real child node exists.
+ */
+function resultHasLiveTracedChild(result: unknown): boolean {
+  const results = (result as { details?: { results?: Array<{ tracedLive?: unknown }> } } | undefined)
+    ?.details?.results;
+  return Array.isArray(results) && results.some((entry) => entry?.tracedLive === true);
+}
+
 function adaptTraceEvent(event: TraceEvent): void {
   const agent = ensureTraceEntities(event);
   switch (event.eventType) {
@@ -824,7 +835,15 @@ function adaptTraceEvent(event: TraceEvent): void {
           toolCallId,
         },
       });
-      if (toolName === 'subagent' && event.payload.is_error && toolCallId) {
+      // The synthetic node is a fallback for failed spawns that emitted no child
+      // lifecycle. When the harness streamed the child(ren) live, a real child
+      // node already exists — skip the synthetic one to avoid a duplicate.
+      if (
+        toolName === 'subagent' &&
+        event.payload.is_error &&
+        toolCallId &&
+        !resultHasLiveTracedChild(event.payload.result)
+      ) {
         const syntheticAgentId = `tool:${toolCallId}`;
         const startEvent = traceEvents.find(
           (candidate) =>

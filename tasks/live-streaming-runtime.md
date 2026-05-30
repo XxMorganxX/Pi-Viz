@@ -63,6 +63,39 @@ pass-through, `.status.pending` CSS), so the fix is mostly server-side.
   `tests/live-streaming.test.ts`. agent-viz: 120 tests pass, `tsc -b` clean.
   pi-trace-extension: 6 tests pass, `tsc` clean. Task complete.
 
+## Subagent live streaming (added 2026-05-30)
+
+Follow-up: subagent spawns rendered only at completion because the harness
+synthesized the child's trace triple post-hoc from the tool result, and the
+live-streaming sink (`SubagentRunRequest.onEvent` + `emitLiveAssistant`/
+`emitLiveToolResult`) was never wired to the `runAgent` call sites.
+
+Wiring (harness-side only — the server already nests children via
+`session_started` + `parentAgentId`):
+
+- `Agentic-Pi/src/subagent-tool.ts`: `SubagentToolOptions` gains `parentAgentId`
+  + `onChildEvent`. `createSubagentTool` wraps `runAgent` so that, when both are
+  present, each child run emits `subagentStartedEvent` at spawn, streams its
+  text/tool events tagged with a stable `subagent:<parent>:<n>` agent id, and
+  emits `subagentEndedEvents` at close. Results carry `agentId` + `tracedLive`.
+- `Agentic-Pi/src/standalone-agent.ts`: passes `parentAgentId: options.agentId`
+  and an `onChildEvent` sink into `createSubagentTool`;
+  `childTraceEventsFromSubagentToolResult` now skips `tracedLive` results (so the
+  live lifecycle isn't duplicated) and honors `result.agentId`.
+
+Result: a subagent node appears at spawn and unfolds live (pending tools,
+thinking/responding activity) instead of popping in fully-formed at completion.
+Tests: `subagent-tool.test.ts` (live stream + no-sink fallback),
+`standalone-agent.test.ts` (skip live-traced / honor agentId). Agentic-Pi: 58
+tests pass, `tsc` clean.
+
+Failed-spawn dedup (resolved): the server's synthetic `tool:<toolCallId>` node
+is now only created when the failed `subagent` result has no live-traced child.
+`resultHasLiveTracedChild` (server/store.ts) checks
+`result.details.results[].tracedLive`. A failed live child renders as one node;
+a spawn that failed before running a child (invalid params) still gets the
+fallback node. Tests in `tests/live-streaming.test.ts`.
+
 ## Out of scope
 
 - Accumulating full streamed text into the tree (high churn; activity indicator

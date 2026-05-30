@@ -74,7 +74,8 @@ export function traceFeedEntries({
       label: event.tool,
       timestamp: event.timestamp,
       status: event.status,
-      text: event.output ?? event.input,
+      text: event.output,
+      inputText: event.input,
       inputSchema: event.inputSchema ?? inputSchemas[event.tool],
     });
   }

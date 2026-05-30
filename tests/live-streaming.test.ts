@@ -86,3 +86,45 @@ test('text and thinking deltas surface live agent activity, cleared at turn end'
   ]);
   assert.equal(orchestrator().activity, undefined, 'activity clears when the turn ends');
 });
+
+function childEvent(sequence: number, eventType: string, payload: Record<string, unknown>): TraceEvent {
+  return { ...traceEvent(sequence, eventType, payload), agentId: 'subagent:agent-1:0', parentAgentId: 'agent-1' };
+}
+
+test('a failed subagent whose child was streamed live does not create a synthetic node', () => {
+  recordTraceEvents([
+    traceEvent(1, 'pi.session_started', { provider: 'anthropic', model_id: 'claude-opus-4-8', tool_names: ['subagent'] }),
+    traceEvent(2, 'pi.tool_call_started', { tool_call_id: 'tool-1', tool_name: 'subagent', args: {} }),
+    childEvent(3, 'pi.session_started', { provider: 'anthropic', model_id: 'claude-opus-4-8', tool_names: [] }),
+    childEvent(4, 'pi.session_ended', { terminal_reason: 'error', usage_total: { input: 1, output: 1, total: 2, cost: 0 } }),
+    traceEvent(5, 'pi.tool_call_ended', {
+      tool_call_id: 'tool-1',
+      tool_name: 'subagent',
+      is_error: true,
+      result: { details: { results: [{ tracedLive: true, agentId: 'subagent:agent-1:0', exitCode: 1 }] } },
+    }),
+  ]);
+
+  const subagents = orchestrator().subagents;
+  assert.equal(subagents.length, 1, 'only the live child node exists');
+  assert.equal(subagents[0].runId, 'subagent:agent-1:0');
+  assert.equal(subagents[0].exitCode, 1);
+});
+
+test('a failed subagent with no live child still gets the synthetic fallback node', () => {
+  recordTraceEvents([
+    traceEvent(1, 'pi.session_started', { provider: 'anthropic', model_id: 'claude-opus-4-8', tool_names: ['subagent'] }),
+    traceEvent(2, 'pi.tool_call_started', { tool_call_id: 'tool-1', tool_name: 'subagent', args: {} }),
+    traceEvent(3, 'pi.tool_call_ended', {
+      tool_call_id: 'tool-1',
+      tool_name: 'subagent',
+      is_error: true,
+      result: 'Invalid parameters. Provide exactly one subagent mode.',
+    }),
+  ]);
+
+  const subagents = orchestrator().subagents;
+  assert.equal(subagents.length, 1);
+  assert.equal(subagents[0].runId, 'tool:tool-1');
+  assert.equal(subagents[0].exitCode, 1);
+});

@@ -91,6 +91,20 @@ test('POST /events rejects unsupported trace schema versions', async () => {
   assert.deepEqual(await response.json(), { error: 'Invalid trace event at index 0' });
 });
 
+test('POST /events answers oversize bodies with 413 instead of resetting the connection', async () => {
+  // A single event whose payload pushes the raw body past the 2 MB cap.
+  const oversizeEvent = traceEvent(1, 'pi.text_delta', { delta: 'x'.repeat(3 * 1024 * 1024) });
+
+  const response = await fetch(`${baseUrl}/events`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: 'Bearer secret' },
+    body: JSON.stringify({ events: [oversizeEvent] }),
+  });
+
+  assert.equal(response.status, 413);
+  assert.deepEqual(await response.json(), { error: 'Request body too large' });
+});
+
 test('POST /events accepts batches and adapts known runtime events into /data', async () => {
   const events: TraceEvent[] = [
     traceEvent(1, 'pi.session_started', {

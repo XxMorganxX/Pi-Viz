@@ -189,6 +189,8 @@ export interface TraceFeedEntry {
   timestamp: string;
   status?: 'ok' | 'error' | 'pending';
   text?: string;
+  /** The tool call's own input arguments (the data the model passed). */
+  inputText?: string;
   inputSchema?: Record<string, unknown>;
   lifecycle?: {
     pairKey: string;
