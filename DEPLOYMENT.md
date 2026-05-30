@@ -29,6 +29,45 @@ PI_TRACE_TOKEN=change-me
 
 For a hosted deployment, replace `localhost:8080` with the public app origin.
 
+## Railway
+
+Railway builds the `Dockerfile` (config in `railway.json`) and serves the frontend
+and trace API from one public origin. The container reads `PORT` from Railway and
+serves the built `dist/` via `AGENT_VIZ_STATIC_DIR=dist` (set in the Dockerfile).
+
+From this directory (`agent-viz/`, the repo root):
+
+```bash
+# one-time
+npm i -g @railway/cli
+railway login
+railway init        # or: railway link  (to attach to an existing project)
+
+# deploy
+railway up
+```
+
+Or connect the GitHub repo (`Instalily/Lily-Runtime-Visualizer`) in the Railway
+dashboard and set this directory as the service root for push-to-deploy.
+
+Set service variables in Railway before exposing a public domain:
+
+- `TRACE_API_TOKEN` — **required**. Without it, trace reads and writes are open to anyone.
+
+Then generate a public domain (Railway detects port `8080` from the Dockerfile).
+Health check is `GET /api/health`.
+
+Point local Pi at the public origin:
+
+```bash
+PI_TRACE_URL=https://<your-app>.up.railway.app/events
+PI_TRACE_TOKEN=<TRACE_API_TOKEN>
+```
+
+Your Mac only needs outbound internet — the harness pushes events to Railway, and
+browsers anywhere read the live stream from the same origin. Nothing on your machine
+is exposed.
+
 ## Node Host Without Docker
 
 ```bash
